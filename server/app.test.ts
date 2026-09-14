@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createWarehouseApp } from "./app.js";
 
 const SECRET = "warehouse-secret-that-must-never-leak";
+const SESSION = "test-panel-jwt";
+const sessionCookie = `warehouse_session=${SESSION}`;
 const servers: Server[] = [];
 
 const startPanel = async (handler: RequestHandler) => {
@@ -28,20 +30,22 @@ afterEach(async () => {
 
 describe("Warehouse BFF", () => {
   it("frontend /api çağrısını whitelist üzerinden panel API'ye iletir ve x-api-key ekler", async () => {
-    const received: { key?: string; path?: string; query?: unknown } = {};
+    const received: { key?: string; authorization?: string; path?: string; query?: unknown } = {};
     const panelUrl = await startPanel((req, res) => {
       received.key = req.header("x-api-key");
+      received.authorization = req.header("authorization");
       received.path = req.path;
       received.query = req.query;
       res.json({ success: true, data: [{ id: "order-1" }], pagination: { total: 1 } });
     });
     const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET });
 
-    const response = await request(app).get("/api/orders?page=2&limit=500&ignored=unsafe");
+    const response = await request(app).get("/api/orders?page=2&limit=500&ignored=unsafe").set("Cookie", sessionCookie);
 
     expect(response.status).toBe(200);
     expect(received).toEqual({
       key: SECRET,
+      authorization: `Bearer ${SESSION}`,
       path: "/api/warehouse/v1/orders",
       query: { page: "2", limit: "100" },
     });
@@ -49,7 +53,7 @@ describe("Warehouse BFF", () => {
 
   it("eksik server API key için gizli bilgi içermeyen 503 döner", async () => {
     const response = await request(createWarehouseApp({ panelApiBaseUrl: "http://panel.test" }))
-      .get("/api/orders");
+      .get("/api/orders").set("Cookie", sessionCookie);
 
     expect(response.status).toBe(503);
     expect(response.body.error.code).toBe("BFF_NOT_CONFIGURED");
@@ -60,7 +64,7 @@ describe("Warehouse BFF", () => {
     const panelUrl = await startPanel((_req, res) =>
       res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid API key" } }));
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: "wrong-key" }))
-      .get("/api/orders");
+      .get("/api/orders").set("Cookie", sessionCookie);
 
     expect(response.status).toBe(401);
     expect(response.body.error.code).toBe("UNAUTHORIZED");
@@ -70,7 +74,7 @@ describe("Warehouse BFF", () => {
     const panelUrl = await startPanel((_req, res) =>
       res.status(status).json({ success: false, error: { code: `STATUS_${status}`, message: "Panel cevabı" } }));
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
-      .get("/api/orders/order-1");
+      .get("/api/orders/order-1").set("Cookie", sessionCookie);
 
     expect(response.status).toBe(status);
     expect(response.body).toEqual({ success: false, error: { code: `STATUS_${status}`, message: "Panel cevabı" } });
@@ -87,7 +91,7 @@ describe("Warehouse BFF", () => {
       panelApiBaseUrl: panelUrl,
       warehouseApiKey: SECRET,
       logger,
-    })).get("/api/orders");
+    })).get("/api/orders").set("Cookie", sessionCookie);
 
     expect(JSON.stringify(response.body)).not.toContain(SECRET);
     expect(response.body["x-api-key"]).toBe("[REDACTED]");
@@ -116,11 +120,65 @@ describe("Warehouse BFF", () => {
       warehouseApiKey: SECRET,
       timeoutMs: 10,
       logger,
-    })).get("/api/orders");
+    })).get("/api/orders").set("Cookie", sessionCookie);
 
     expect(response.status).toBe(504);
     expect(response.body.error.code).toBe("UPSTREAM_TIMEOUT");
     expect(JSON.stringify(response.body)).not.toContain(SECRET);
     expect(JSON.stringify(logger.error.mock.calls)).not.toContain(SECRET);
+  });
+
+  it("oturumsuz Warehouse çağrısını panele göndermeden 401 ile reddeder", async () => {
+    const panelRequest = vi.fn((_req, res) => res.json({ success: true }));
+    const panelUrl = await startPanel(panelRequest);
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .get("/api/orders");
+    expect(response.status).toBe(401);
+    expect(response.body.error.code).toBe("SESSION_REQUIRED");
+    expect(panelRequest).not.toHaveBeenCalled();
+  });
+
+  it("panel giriş tokenını HttpOnly cookie yapar ve response içinde göstermez", async () => {
+    const panelUrl = await startPanel((req, res) => {
+      expect(req.path).toBe("/api/auth/login");
+      res.json({ success: true, token: SESSION, user: { id: "user-1", username: "Alper", role: "admin", must_change_password: false } });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .post("/api/auth/login").send({ username: "Alper", password: "correct-password" });
+    expect(response.status).toBe(200);
+    expect(response.headers["set-cookie"]?.[0]).toContain("HttpOnly");
+    expect(response.headers["set-cookie"]?.[0]).toContain("SameSite=Strict");
+    expect(JSON.stringify(response.body)).not.toContain(SESSION);
+    expect(response.body.data.username).toBe("Alper");
+  });
+
+  it("login hatasını ve durum kodunu token üretmeden aktarır", async () => {
+    const panelUrl = await startPanel((_req, res) => res.status(401).json({ success: false, error: { code: "AUTH_FAILED", message: "Geçersiz kullanıcı adı veya şifre." } }));
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .post("/api/auth/login").send({ username: "Alper", password: "wrong" });
+    expect(response.status).toBe(401);
+    expect(response.body.error.code).toBe("AUTH_FAILED");
+    expect(response.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("verify-pick için yalnızca güvenli body alanlarını aktarır", async () => {
+    let receivedBody: unknown;
+    const panelUrl = await startPanel((req, res) => {
+      receivedBody = req.body;
+      res.json({ success: true, data: { product_id: "p1", match_type: "sku" } });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .post("/api/orders/o1/verify-pick")
+      .set("Cookie", sessionCookie)
+      .send({ product_id: "p1", code: "SKU-1", admin: true });
+    expect(response.status).toBe(200);
+    expect(receivedBody).toEqual({ product_id: "p1", code: "SKU-1" });
+  });
+
+  it("logout oturum cookie'sini temizler", async () => {
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: "http://panel.test", warehouseApiKey: SECRET }))
+      .post("/api/auth/logout").set("Cookie", sessionCookie);
+    expect(response.status).toBe(200);
+    expect(response.headers["set-cookie"]?.[0]).toMatch(/warehouse_session=;/);
   });
 });

@@ -1,15 +1,15 @@
 # DSDST Warehouse
 
-Panel uygulamasından bağımsız, mobil öncelikli sipariş toplama PWA'sı. Ürün, sipariş, BOM ve stok verilerini yalnızca panelin Warehouse API'sinden okur. Yerel olarak yalnızca aktif toplama ilerlemesi saklanır.
+Panel uygulamasından bağımsız, mobil öncelikli sipariş toplama PWA'sı. Ürün, sipariş, BOM, stok ve toplama ilerlemesi için paneli tek veri kaynağı olarak kullanır; picking progress browser depolamasında tutulmaz.
 
 ## Mimari
 
 ```text
 Browser/PWA → aynı origin /api → Warehouse Express BFF → Panel Warehouse API
-                                      └─ x-api-key yalnızca burada eklenir
+                 └─ HttpOnly JWT         └─ x-api-key + panel JWT yalnızca burada eklenir
 ```
 
-Browser hiçbir API anahtarı veya panel adresi bilmez. BFF yalnızca tanımlı sipariş, pick-plan ve scan rotalarını kabul eder; genel amaçlı proxy değildir. Panel yanıtları önbelleğe alınmaz, anahtar içeren alanlar veya metinler frontend'e dönmeden redakte edilir.
+Browser hiçbir API anahtarı, panel adresi veya JavaScript tarafından okunabilir JWT bilmez. Login sonucu BFF tarafından `HttpOnly`, `SameSite=Strict` cookie'ye çevrilir. BFF yalnızca tanımlı auth, sipariş, pick-plan, doğrulama, ürün-adet tamamlama ve ürün görseli rotalarını kabul eder; genel amaçlı proxy değildir. Panel yanıtları önbelleğe alınmaz, anahtar/token içeren alanlar veya metinler frontend'e dönmeden redakte edilir.
 
 ## Yerel geliştirme
 
@@ -28,6 +28,8 @@ API anahtarı `read:warehouse_orders`, `read:products`, `read:bom` ve `write:war
 ```env
 PANEL_API_BASE_URL=http://panel-address:3000
 WAREHOUSE_API_KEY=replace-with-warehouse-api-key
+# HTTPS üzerinden yayınlıyorsanız Secure cookie kullanın:
+COOKIE_SECURE=true
 ```
 
 Bu değişkenler Vite build argümanı değildir. `.env`, Docker build context'ine de alınmaz.
@@ -40,7 +42,7 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
-Cloudflare tarafında `depo.dsdst.com` origin'i `http://<sunucu>:3006` hedefine yönlendirilebilir.
+Cloudflare tarafında `depo.dsdst.com` origin'i `http://<sunucu>:3006` hedefine yönlendirilebilir. Browser uygulamaya HTTPS ile ulaşıyorsa `.env` içinde `COOKIE_SECURE=true` kullanın; yalnız doğrudan HTTP ile yerel testte `false` bırakın.
 
 ## Kontroller
 
@@ -50,6 +52,6 @@ npm run typecheck
 npm run build
 ```
 
-Service worker yalnızca uygulama kabuğunu önbelleğe alır. Warehouse API istekleri önbelleğe alınmaz; çevrimdışı yazma işlemleri engellenir.
+Service worker yalnızca uygulama kabuğunu önbelleğe alır. Warehouse API istekleri önbelleğe alınmaz; çevrimdışı yazma işlemleri engellenir. Login paneldeki mevcut kullanıcı adı/e-posta ve şifre ile yapılır; ayrı Warehouse kullanıcısı oluşturulmaz.
 
 `npm run build` sonrasında frontend çıktısı ayrıca API anahtarı ve yasaklı env adları için taranır.

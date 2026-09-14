@@ -1,7 +1,7 @@
 import type {
   Pagination,
   PickPlan,
-  ScannedProduct,
+  AuthUser,
   WarehouseOrder,
   WarehouseOrderSummary,
 } from "../types/warehouse";
@@ -15,8 +15,8 @@ interface ApiEnvelope<T> {
 }
 
 const FRIENDLY_STATUS_MESSAGES: Record<number, string> = {
-  401: "API anahtarı eksik veya geçersiz.",
-  403: "Bu işlem için Warehouse API yetkisi yok.",
+  401: "Oturum geçersiz veya süresi dolmuş.",
+  403: "Bu işlem için yetkiniz yok.",
   404: "İstenen sipariş veya ürün bulunamadı.",
   409: "Sipariş durumu değişti. Listeyi yenileyip tekrar deneyin.",
 };
@@ -41,6 +41,7 @@ const request = async <T>(path: string, init: RequestInit = {}): Promise<ApiEnve
   try {
     response = await fetch(`/api${path}`, {
       ...init,
+      credentials: "same-origin",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
@@ -53,8 +54,11 @@ const request = async <T>(path: string, init: RequestInit = {}): Promise<ApiEnve
 
   const body = (await response.json().catch(() => ({}))) as Partial<ApiEnvelope<T>>;
   if (!response.ok) {
+    if (response.status === 401 && path !== "/auth/login" && path !== "/auth/me") {
+      window.dispatchEvent(new Event("warehouse:unauthorized"));
+    }
     throw new ApiError(
-      FRIENDLY_STATUS_MESSAGES[response.status] || body.error?.message || "İşlem tamamlanamadı.",
+      body.error?.message || FRIENDLY_STATUS_MESSAGES[response.status] || "İşlem tamamlanamadı.",
       response.status,
       body.error?.code,
     );
@@ -63,7 +67,7 @@ const request = async <T>(path: string, init: RequestInit = {}): Promise<ApiEnve
 };
 
 export const warehouseApi = {
-  async listOrders(page = 1, limit = 25) {
+  async listOrders(page = 1, limit = 100) {
     const result = await request<WarehouseOrderSummary[]>(`/orders?page=${page}&limit=${limit}`);
     return { orders: result.data, pagination: result.pagination! };
   },
@@ -73,14 +77,38 @@ export const warehouseApi = {
   async getPickPlan(id: string) {
     return (await request<PickPlan>(`/orders/${encodeURIComponent(id)}/pick-plan`)).data;
   },
-  async scan(code: string) {
-    return (await request<ScannedProduct>(`/scan/${encodeURIComponent(code.trim())}`)).data;
-  },
   async startOrder(id: string) {
     return (await request<PickPlan["order"]>(`/orders/${encodeURIComponent(id)}/start`, { method: "POST" })).data;
   },
+  async verifyPick(id: string, productId: string, code: string) {
+    return (await request<{ product_id: string; match_type: "sku" | "barcode" | "location"; verified: boolean }>(
+      `/orders/${encodeURIComponent(id)}/verify-pick`,
+      { method: "POST", body: JSON.stringify({ product_id: productId, code }) },
+    )).data;
+  },
+  async completePickItem(id: string, productId: string, pickedQuantity: number) {
+    return (await request<Record<string, unknown>>(
+      `/orders/${encodeURIComponent(id)}/pick-items/${encodeURIComponent(productId)}/complete`,
+      { method: "POST", body: JSON.stringify({ picked_quantity: pickedQuantity }) },
+    )).data;
+  },
   async completeOrder(id: string) {
     return (await request<PickPlan["order"]>(`/orders/${encodeURIComponent(id)}/complete`, { method: "POST" })).data;
+  },
+};
+
+export const authApi = {
+  async login(username: string, password: string) {
+    return (await request<AuthUser>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    })).data;
+  },
+  async me() {
+    return (await request<AuthUser>("/auth/me")).data;
+  },
+  async logout() {
+    await request<null>("/auth/logout", { method: "POST" });
   },
 };
 

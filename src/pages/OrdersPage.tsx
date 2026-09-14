@@ -1,30 +1,34 @@
-import { ChevronLeft, ChevronRight, PackageOpen, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { PackageOpen, RefreshCw, Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ErrorState, LoadingState } from "../components/AsyncState";
 import { StatusBadge } from "../components/StatusBadge";
 import { getErrorMessage, warehouseApi } from "../lib/api";
 import { formatDate, platformLabel } from "../lib/format";
-import type { Pagination, WarehouseOrderSummary } from "../types/warehouse";
+import type { WarehouseOrderSummary } from "../types/warehouse";
 
 export function OrdersPage() {
   const [orders, setOrders] = useState<WarehouseOrderSummary[]>([]);
-  const [pagination, setPagination] = useState<Pagination | null>(null);
-  const [page, setPage] = useState(1);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<"Tümü" | "Hazırlanıyor" | "Toplanıyor">("Tümü");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const load = () => {
-    setLoading(true);
+  const load = useCallback((showLoading = true) => {
+    if (showLoading) setLoading(true);
     setError("");
-    warehouseApi.listOrders(page, 25)
-      .then(({ orders: rows, pagination: meta }) => { setOrders(rows); setPagination(meta); })
+    warehouseApi.listOrders(1, 100)
+      .then(({ orders: rows }) => setOrders(rows))
       .catch((reason) => setError(getErrorMessage(reason)))
       .finally(() => setLoading(false));
-  };
-  useEffect(load, [page]);
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load(false);
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [load]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase("tr");
@@ -36,10 +40,9 @@ export function OrdersPage() {
 
   return (
     <div className="pt-4">
-      <div className="mb-5">
-        <p className="eyebrow">Sipariş kuyruğu</p>
-        <h1 className="page-title">Toplanacak siparişler</h1>
-        <p className="mt-2 text-sm text-muted">En eski siparişler önce gösterilir.</p>
+      <div className="mb-5 flex items-end justify-between gap-4">
+        <div><p className="eyebrow">Sipariş kuyruğu</p><h1 className="page-title">Toplanacak siparişler</h1><p className="mt-2 text-sm text-muted">En eski siparişler önce gösterilir.</p></div>
+        <button className="icon-button shrink-0" aria-label="Listeyi yenile" onClick={() => void load(false)}><RefreshCw size={20}/></button>
       </div>
 
       <div className="sticky top-0 z-20 -mx-4 space-y-3 bg-canvas/95 px-4 py-3 backdrop-blur">
@@ -63,7 +66,7 @@ export function OrdersPage() {
                 <StatusBadge status={order.status} />
               </div>
               <div className="mt-4 flex items-end justify-between border-t border-line pt-3">
-                <div><p className="text-xs font-bold uppercase tracking-wide text-muted">{platformLabel(order.platform)}</p><p className="mt-1 text-xs text-muted">{formatDate(order.created_at)}</p></div>
+                <div><p className="text-xs font-bold uppercase tracking-wide text-muted">{platformLabel(order.platform)}</p><p className="mt-1 text-xs text-muted">{formatDate(order.created_at)}</p>{order.picker && <p className="mt-1 text-xs font-bold text-amber-700">{order.picker.name} topluyor</p>}</div>
                 <div className="text-right"><strong className="text-2xl font-black">{order.total_quantity}</strong><span className="ml-1 text-xs font-bold text-muted">adet</span></div>
               </div>
             </Link>
@@ -72,13 +75,6 @@ export function OrdersPage() {
         </div>
       )}
 
-      {pagination && pagination.total_pages > 1 && (
-        <div className="mt-5 flex items-center justify-between">
-          <button className="secondary-button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft /> Önceki</button>
-          <span className="text-sm font-bold text-muted">{page} / {pagination.total_pages}</span>
-          <button className="secondary-button" disabled={page >= pagination.total_pages} onClick={() => setPage((value) => value + 1)}>Sonraki <ChevronRight /></button>
-        </div>
-      )}
     </div>
   );
 }

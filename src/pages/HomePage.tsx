@@ -1,18 +1,22 @@
 import { ArrowRight, CircleCheck, CircleX, PackageCheck, Play } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { loadPickSession } from "../features/picking/pickStorage";
+import { useAuth } from "../features/auth/AuthContext";
 import { getErrorMessage, warehouseApi } from "../lib/api";
+import type { WarehouseOrderSummary } from "../types/warehouse";
 
 export function HomePage() {
-  const activeSession = loadPickSession();
-  const [state, setState] = useState<{ total?: number; error?: string }>({});
+  const { user } = useAuth();
+  const [state, setState] = useState<{ total?: number; activeOrder?: WarehouseOrderSummary; error?: string }>({});
 
   useEffect(() => {
-    warehouseApi.listOrders(1, 1)
-      .then(({ pagination }) => setState({ total: pagination.total }))
+    warehouseApi.listOrders(1, 100)
+      .then(({ orders, pagination }) => setState({
+        total: pagination.total,
+        activeOrder: orders.find((order) => order.status === "Toplanıyor" && order.picker?.user_id === user?.id),
+      }))
       .catch((error) => setState({ error: getErrorMessage(error) }));
-  }, []);
+  }, [user?.id]);
 
   return (
     <div className="space-y-5 pt-4">
@@ -26,11 +30,11 @@ export function HomePage() {
         </Link>
       </section>
 
-      {activeSession && (
-        <Link to={`/orders/${activeSession.orderId}/pick`} className="flex min-h-20 items-center justify-between rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 transition active:scale-[0.99]">
+      {state.activeOrder && (
+        <Link to={`/orders/${state.activeOrder.id}/pick`} className="flex min-h-20 items-center justify-between rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 transition active:scale-[0.99]">
           <span className="flex items-center gap-3">
             <span className="grid size-11 place-items-center rounded-xl bg-amber-400 text-amber-950"><Play size={21} fill="currentColor" /></span>
-            <span><span className="block text-xs font-bold text-amber-800">Aktif toplama</span><span className="block font-black">{activeSession.orderCode}</span></span>
+            <span><span className="block text-xs font-bold text-amber-800">Aktif toplama</span><span className="block font-black">{state.activeOrder.order_code}</span></span>
           </span>
           <span className="font-black text-amber-900">Devam et</span>
         </Link>

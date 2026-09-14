@@ -1,12 +1,14 @@
-import { ArrowLeft, Boxes, WifiOff } from "lucide-react";
+import { ArrowLeft, Boxes, LogOut, WifiOff } from "lucide-react";
 import type { PropsWithChildren } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useOnlineStatus } from "../hooks/useOnlineStatus";
+import { useAuth } from "../features/auth/AuthContext";
 
 export function AppShell({ children }: PropsWithChildren) {
   const location = useLocation();
   const navigate = useNavigate();
   const online = useOnlineStatus();
+  const { user, logout } = useAuth();
   const isHome = location.pathname === "/";
 
   return (
@@ -33,9 +35,10 @@ export function AppShell({ children }: PropsWithChildren) {
             </span>
           </Link>
         </div>
-        <span className="rounded-full border border-line bg-white px-3 py-1.5 text-xs font-bold text-muted">
-          Sipariş toplama
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="hidden rounded-full border border-line bg-white px-3 py-1.5 text-xs font-bold text-muted sm:block">{user?.username}</span>
+          <button className="icon-button" aria-label="Çıkış yap" title={`${user?.username} · Çıkış yap`} onClick={() => void logout()}><LogOut size={20}/></button>
+        </div>
       </header>
       <main className="mx-auto w-full max-w-2xl px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">{children}</main>
     </div>

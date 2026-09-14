@@ -1,26 +1,50 @@
 import express from "express";
 import helmet from "helmet";
 import path from "node:path";
+const SESSION_COOKIE = "warehouse_session";
+const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 const sensitiveFieldNames = new Set([
-    "x-api-key",
-    "x_api_key",
-    "api-key",
-    "api_key",
-    "warehouse_api_key",
+    "x-api-key", "x_api_key", "api-key", "api_key", "warehouse_api_key",
+    "authorization", "cookie", "token", "password",
 ]);
-const redactSensitive = (value, secret) => {
+const redactSensitive = (value, secrets) => {
     if (typeof value === "string") {
-        return secret && value.includes(secret) ? value.split(secret).join("[REDACTED]") : value;
+        return secrets.filter(Boolean).reduce((safe, secret) => safe.split(secret).join("[REDACTED]"), value);
     }
     if (Array.isArray(value))
-        return value.map((item) => redactSensitive(item, secret));
+        return value.map((item) => redactSensitive(item, secrets));
     if (value && typeof value === "object") {
         return Object.fromEntries(Object.entries(value).map(([key, item]) => [
             key,
-            sensitiveFieldNames.has(key.toLowerCase()) ? "[REDACTED]" : redactSensitive(item, secret),
+            sensitiveFieldNames.has(key.toLowerCase()) ? "[REDACTED]" : redactSensitive(item, secrets),
         ]));
     }
     return value;
+};
+const rewritePanelPaths = (value) => {
+    if (typeof value === "string") {
+        return value.replace(/^\/api\/warehouse\/v1\/products\//, "/api/products/");
+    }
+    if (Array.isArray(value))
+        return value.map(rewritePanelPaths);
+    if (value && typeof value === "object") {
+        return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, rewritePanelPaths(item)]));
+    }
+    return value;
+};
+const readCookie = (req, name) => {
+    for (const pair of String(req.headers.cookie || "").split(";")) {
+        const separator = pair.indexOf("=");
+        if (separator < 0 || pair.slice(0, separator).trim() !== name)
+            continue;
+        try {
+            return decodeURIComponent(pair.slice(separator + 1).trim());
+        }
+        catch {
+            return undefined;
+        }
+    }
+    return undefined;
 };
 const safePositiveInteger = (value, fallback, max) => {
     const source = Array.isArray(value) ? value[0] : value;
@@ -46,6 +70,12 @@ export function createWarehouseApp(config) {
     const app = express();
     const timeoutMs = config.timeoutMs ?? 8_000;
     const logger = config.logger ?? console;
+    const cookieOptions = {
+        httpOnly: true,
+        sameSite: "strict",
+        secure: config.cookieSecure ?? false,
+        path: "/",
+    };
     app.disable("x-powered-by");
     app.use(helmet({ contentSecurityPolicy: false }));
     app.use(express.json({ limit: "16kb", strict: true }));
@@ -54,53 +84,29 @@ export function createWarehouseApp(config) {
         next();
     });
     app.get("/health", (_req, res) => res.json({ status: "ok" }));
-    const forward = async (req, res, method, upstreamPath, query) => {
+    const configurationFailure = (res) => {
         const invalidConfig = configError(config);
-        if (invalidConfig) {
-            return res.status(503).json({
-                success: false,
-                error: {
-                    code: invalidConfig === "missing" ? "BFF_NOT_CONFIGURED" : "BFF_INVALID_CONFIG",
-                    message: "Warehouse bağlantısı sunucuda yapılandırılmamış.",
-                },
-            });
-        }
+        if (!invalidConfig)
+            return false;
+        res.status(503).json({
+            success: false,
+            error: {
+                code: invalidConfig === "missing" ? "BFF_NOT_CONFIGURED" : "BFF_INVALID_CONFIG",
+                message: "Warehouse bağlantısı sunucuda yapılandırılmamış.",
+            },
+        });
+        return true;
+    };
+    const fetchPanel = async (res, target, init) => {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), timeoutMs);
         try {
-            const baseUrl = config.panelApiBaseUrl.replace(/\/$/, "");
-            const target = new URL(`${baseUrl}/api/warehouse/v1${upstreamPath}`);
-            if (query)
-                target.search = query.toString();
-            const upstream = await fetch(target, {
-                method,
-                headers: {
-                    Accept: "application/json",
-                    "x-api-key": config.warehouseApiKey,
-                },
-                redirect: "error",
-                signal: controller.signal,
-            });
-            if (upstream.status === 204)
-                return res.status(204).end();
-            const rawBody = await upstream.text();
-            let body;
-            try {
-                body = JSON.parse(rawBody);
-            }
-            catch {
-                logger.error("[warehouse-bff] UPSTREAM_INVALID_RESPONSE");
-                return res.status(502).json({
-                    success: false,
-                    error: { code: "UPSTREAM_INVALID_RESPONSE", message: "Panel API geçersiz yanıt verdi." },
-                });
-            }
-            return res.status(upstream.status).json(redactSensitive(body, config.warehouseApiKey));
+            return await fetch(target, { ...init, redirect: "error", signal: controller.signal });
         }
         catch (error) {
             const timedOut = error instanceof Error && error.name === "AbortError";
             logger.error(`[warehouse-bff] ${timedOut ? "UPSTREAM_TIMEOUT" : "UPSTREAM_UNAVAILABLE"}`);
-            return res.status(timedOut ? 504 : 502).json({
+            res.status(timedOut ? 504 : 502).json({
                 success: false,
                 error: {
                     code: timedOut ? "UPSTREAM_TIMEOUT" : "UPSTREAM_UNAVAILABLE",
@@ -109,23 +115,168 @@ export function createWarehouseApp(config) {
                         : "Panel bağlantısı yok. Ağ bağlantısını kontrol edin.",
                 },
             });
+            return null;
         }
         finally {
             clearTimeout(timeout);
         }
     };
-    app.get("/api/orders", (req, res) => {
+    const readJson = async (upstream, res) => {
+        const rawBody = await upstream.text();
+        try {
+            return JSON.parse(rawBody);
+        }
+        catch {
+            logger.error("[warehouse-bff] UPSTREAM_INVALID_RESPONSE");
+            res.status(502).json({
+                success: false,
+                error: { code: "UPSTREAM_INVALID_RESPONSE", message: "Panel API geçersiz yanıt verdi." },
+            });
+            return null;
+        }
+    };
+    const safeResponse = (body, sessionToken = "") => rewritePanelPaths(redactSensitive(body, [config.warehouseApiKey || "", sessionToken]));
+    const requireSession = (req, res, next) => {
+        const token = readCookie(req, SESSION_COOKIE);
+        if (!token) {
+            return res.status(401).json({
+                success: false,
+                error: { code: "SESSION_REQUIRED", message: "Oturum açmanız gerekiyor." },
+            });
+        }
+        res.locals.sessionToken = token;
+        next();
+    };
+    app.post("/api/auth/login", async (req, res) => {
+        if (configurationFailure(res))
+            return;
+        const username = typeof req.body?.username === "string" ? req.body.username.trim().slice(0, 254) : "";
+        const password = typeof req.body?.password === "string" ? req.body.password.slice(0, 1024) : "";
+        if (!username || !password) {
+            return res.status(400).json({
+                success: false,
+                error: { code: "VALIDATION_ERROR", message: "Kullanıcı adı/e-posta ve şifre zorunludur." },
+            });
+        }
+        const target = new URL(`${config.panelApiBaseUrl.replace(/\/$/, "")}/api/auth/login`);
+        const upstream = await fetchPanel(res, target, {
+            method: "POST",
+            headers: { Accept: "application/json", "Content-Type": "application/json" },
+            body: JSON.stringify({ username, password }),
+        });
+        if (!upstream)
+            return;
+        const body = await readJson(upstream, res);
+        if (body === null)
+            return;
+        if (!upstream.ok)
+            return res.status(upstream.status).json(safeResponse(body));
+        const auth = body;
+        const token = typeof auth.token === "string" ? auth.token : "";
+        if (!token || !auth.user) {
+            logger.error("[warehouse-bff] UPSTREAM_INVALID_AUTH_RESPONSE");
+            return res.status(502).json({
+                success: false,
+                error: { code: "UPSTREAM_INVALID_RESPONSE", message: "Panel oturum yanıtı geçersiz." },
+            });
+        }
+        if (auth.user.must_change_password === true) {
+            return res.status(403).json({
+                success: false,
+                error: { code: "PASSWORD_CHANGE_REQUIRED", message: "Önce panel üzerinden şifrenizi değiştirin." },
+            });
+        }
+        res.cookie(SESSION_COOKIE, token, { ...cookieOptions, maxAge: SESSION_MAX_AGE_MS });
+        return res.json({ success: true, data: safeResponse(auth.user, token) });
+    });
+    app.get("/api/auth/me", requireSession, async (_req, res) => {
+        if (configurationFailure(res))
+            return;
+        const token = String(res.locals.sessionToken);
+        const target = new URL(`${config.panelApiBaseUrl.replace(/\/$/, "")}/api/auth/me`);
+        const upstream = await fetchPanel(res, target, {
+            method: "GET",
+            headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+        });
+        if (!upstream)
+            return;
+        const body = await readJson(upstream, res);
+        if (body === null)
+            return;
+        if (!upstream.ok) {
+            res.clearCookie(SESSION_COOKIE, cookieOptions);
+            return res.status(upstream.status).json(safeResponse(body, token));
+        }
+        return res.json({ success: true, data: safeResponse(body.user, token) });
+    });
+    app.post("/api/auth/logout", (_req, res) => {
+        res.clearCookie(SESSION_COOKIE, cookieOptions);
+        res.json({ success: true, data: null });
+    });
+    const forward = async (req, res, method, upstreamPath, query, body, binary = false) => {
+        if (configurationFailure(res))
+            return;
+        const sessionToken = String(res.locals.sessionToken);
+        const baseUrl = config.panelApiBaseUrl.replace(/\/$/, "");
+        const target = new URL(`${baseUrl}/api/warehouse/v1${upstreamPath}`);
+        if (query)
+            target.search = query.toString();
+        const upstream = await fetchPanel(res, target, {
+            method,
+            headers: {
+                Accept: binary ? "image/*" : "application/json",
+                ...(body ? { "Content-Type": "application/json" } : {}),
+                "x-api-key": config.warehouseApiKey,
+                Authorization: `Bearer ${sessionToken}`,
+            },
+            ...(body ? { body: JSON.stringify(body) } : {}),
+        });
+        if (!upstream)
+            return;
+        if (binary && upstream.ok) {
+            const contentType = upstream.headers.get("content-type");
+            if (contentType)
+                res.setHeader("Content-Type", contentType);
+            return res.status(upstream.status).send(Buffer.from(await upstream.arrayBuffer()));
+        }
+        if (upstream.status === 204)
+            return res.status(204).end();
+        const responseBody = await readJson(upstream, res);
+        if (responseBody === null)
+            return;
+        return res.status(upstream.status).json(safeResponse(responseBody, sessionToken));
+    };
+    app.get("/api/orders", requireSession, (req, res) => {
         const query = new URLSearchParams({
             page: String(safePositiveInteger(req.query.page, 1)),
-            limit: String(safePositiveInteger(req.query.limit, 25, 100)),
+            limit: String(safePositiveInteger(req.query.limit, 100, 100)),
         });
         return forward(req, res, "GET", "/orders", query);
     });
-    app.get("/api/orders/:id", (req, res) => forward(req, res, "GET", `/orders/${encodeURIComponent(String(req.params.id))}`));
-    app.get("/api/orders/:id/pick-plan", (req, res) => forward(req, res, "GET", `/orders/${encodeURIComponent(String(req.params.id))}/pick-plan`));
-    app.get("/api/scan/:code", (req, res) => forward(req, res, "GET", `/scan/${encodeURIComponent(String(req.params.code))}`));
-    app.post("/api/orders/:id/start", (req, res) => forward(req, res, "POST", `/orders/${encodeURIComponent(String(req.params.id))}/start`));
-    app.post("/api/orders/:id/complete", (req, res) => forward(req, res, "POST", `/orders/${encodeURIComponent(String(req.params.id))}/complete`));
+    app.get("/api/orders/:id", requireSession, (req, res) => forward(req, res, "GET", `/orders/${encodeURIComponent(String(req.params.id))}`));
+    app.get("/api/orders/:id/pick-plan", requireSession, (req, res) => forward(req, res, "GET", `/orders/${encodeURIComponent(String(req.params.id))}/pick-plan`));
+    app.get("/api/scan/:code", requireSession, (req, res) => forward(req, res, "GET", `/scan/${encodeURIComponent(String(req.params.code))}`));
+    app.get("/api/products/:id/image", requireSession, (req, res) => forward(req, res, "GET", `/products/${encodeURIComponent(String(req.params.id))}/image`, undefined, undefined, true));
+    app.post("/api/orders/:id/start", requireSession, (req, res) => forward(req, res, "POST", `/orders/${encodeURIComponent(String(req.params.id))}/start`));
+    app.post("/api/orders/:id/verify-pick", requireSession, (req, res) => {
+        const productId = typeof req.body?.product_id === "string" ? req.body.product_id.trim() : "";
+        const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
+        if (!productId || !code) {
+            return res.status(400).json({ success: false, error: { code: "VALIDATION_ERROR", message: "Ürün ve kod zorunludur." } });
+        }
+        return forward(req, res, "POST", `/orders/${encodeURIComponent(String(req.params.id))}/verify-pick`, undefined, {
+            product_id: productId,
+            code,
+        });
+    });
+    app.post("/api/orders/:id/pick-items/:productId/complete", requireSession, (req, res) => {
+        const pickedQuantity = Number(req.body?.picked_quantity);
+        if (!Number.isFinite(pickedQuantity)) {
+            return res.status(400).json({ success: false, error: { code: "VALIDATION_ERROR", message: "Toplanan adet zorunludur." } });
+        }
+        return forward(req, res, "POST", `/orders/${encodeURIComponent(String(req.params.id))}/pick-items/${encodeURIComponent(String(req.params.productId))}/complete`, undefined, { picked_quantity: pickedQuantity });
+    });
+    app.post("/api/orders/:id/complete", requireSession, (req, res) => forward(req, res, "POST", `/orders/${encodeURIComponent(String(req.params.id))}/complete`));
     app.use("/api", (_req, res) => res.status(404).json({
         success: false,
         error: { code: "BFF_ROUTE_NOT_FOUND", message: "Warehouse API yolu bulunamadı." },

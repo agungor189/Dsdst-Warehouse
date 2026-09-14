@@ -1,5 +1,19 @@
 export type OrderStatus = "Hazırlanıyor" | "Toplanıyor" | "Toplandı" | string;
 
+export interface AuthUser {
+  id: string;
+  username: string;
+  role: string;
+  must_change_password: boolean;
+}
+
+export interface WarehousePicker {
+  user_id: string;
+  name: string;
+  started_at: string | null;
+  completed_at?: string | null;
+}
+
 export interface WarehouseOrderSummary {
   id: string;
   order_code: string;
@@ -8,6 +22,7 @@ export interface WarehouseOrderSummary {
   total_quantity: number;
   status: OrderStatus;
   created_at: string;
+  picker: WarehousePicker | null;
 }
 
 export interface SaleItem {
@@ -34,6 +49,7 @@ export interface WarehouseOrder {
   total_weight: number;
   created_at: string;
   updated_at: string;
+  picker: WarehousePicker | null;
   items: SaleItem[];
 }
 
@@ -48,6 +64,10 @@ export interface PickItem {
   product_type: string;
   parent_assembly_sku: string | null;
   parent_assembly_skus: string[];
+  image_url: string | null;
+  picked_quantity: number;
+  verified_code_type: "sku" | "barcode" | "location" | null;
+  completed_at: string | null;
 }
 
 export interface PickShortage {
@@ -59,7 +79,7 @@ export interface PickShortage {
 }
 
 export interface PickPlan {
-  order: { id: string; order_code: string; status: OrderStatus };
+  order: { id: string; order_code: string; status: OrderStatus; picker: WarehousePicker | null };
   items: PickItem[];
   shortages: PickShortage[];
   unresolved_items: Array<Record<string, unknown>>;
@@ -80,14 +100,4 @@ export interface Pagination {
   limit: number;
   total: number;
   total_pages: number;
-}
-
-export interface PickSession {
-  orderId: string;
-  orderCode: string;
-  activePickIndex: number;
-  pickedQuantities: Record<string, number>;
-  startedAt: string;
-  phase: "location" | "product" | "quantity";
-  verifiedSku: string | null;
 }

@@ -14,11 +14,20 @@ describe("Warehouse API client", () => {
   });
 
   it("sipariş listesini aynı origin /api yolundan ve anahtarsız getirir", async () => {
-    vi.mocked(fetch).mockImplementation(() => response({ success: true, data: [orderSummary], pagination: { page: 1, limit: 25, total: 1, total_pages: 1 } }));
+    vi.mocked(fetch).mockImplementation(() => response({ success: true, data: [orderSummary], pagination: { page: 1, limit: 100, total: 1, total_pages: 1 } }));
     const result = await warehouseApi.listOrders();
     expect(result.orders[0].order_code).toBe("DS-1042");
-    expect(fetch).toHaveBeenCalledWith("/api/orders?page=1&limit=25", expect.objectContaining({
+    expect(fetch).toHaveBeenCalledWith("/api/orders?page=1&limit=100", expect.objectContaining({
       headers: expect.not.objectContaining({ "x-api-key": expect.anything() }),
+    }));
+  });
+
+  it("verify-pick body içinde yalnız ürün ve kodu gönderir", async () => {
+    vi.mocked(fetch).mockImplementation(() => response({ success: true, data: { product_id: "product-1", match_type: "location", verified: true } }));
+    await warehouseApi.verifyPick("order-1", "product-1", "A1-K2-P3");
+    expect(fetch).toHaveBeenCalledWith("/api/orders/order-1/verify-pick", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ product_id: "product-1", code: "A1-K2-P3" }),
     }));
   });
 

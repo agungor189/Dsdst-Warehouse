@@ -8,6 +8,7 @@ export const orderSummary: WarehouseOrderSummary = {
   total_quantity: 2,
   status: "Hazırlanıyor",
   created_at: "2026-09-14T08:00:00.000Z",
+  picker: null,
 };
 
 export const order: WarehouseOrder = {
@@ -22,6 +23,7 @@ export const order: WarehouseOrder = {
   total_weight: 0,
   created_at: "2026-09-14T08:00:00.000Z",
   updated_at: "2026-09-14T08:00:00.000Z",
+  picker: null,
   items: [{
     id: "sale-item-1",
     product_id: "product-1",
@@ -36,7 +38,7 @@ export const order: WarehouseOrder = {
 };
 
 export const pickPlan: PickPlan = {
-  order: { id: "order-1", order_code: "DS-1042", status: "Hazırlanıyor" },
+  order: { id: "order-1", order_code: "DS-1042", status: "Hazırlanıyor", picker: null },
   items: [{
     product_id: "product-1",
     sku: "CS-R075-H2",
@@ -48,6 +50,10 @@ export const pickPlan: PickPlan = {
     product_type: "simple",
     parent_assembly_sku: null,
     parent_assembly_skus: [],
+    image_url: null,
+    picked_quantity: 0,
+    verified_code_type: null,
+    completed_at: null,
   }],
   shortages: [],
   unresolved_items: [],

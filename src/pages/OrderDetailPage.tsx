@@ -4,7 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ErrorState, LoadingState } from "../components/AsyncState";
 import { ShortageAlert } from "../components/ShortageAlert";
 import { StatusBadge } from "../components/StatusBadge";
-import { createPickSession, savePickSession } from "../features/picking/pickStorage";
+import { useAuth } from "../features/auth/AuthContext";
 import { getErrorMessage, warehouseApi } from "../lib/api";
 import { formatDate, platformLabel } from "../lib/format";
 import type { PickPlan, WarehouseOrder } from "../types/warehouse";
@@ -12,6 +12,7 @@ import type { PickPlan, WarehouseOrder } from "../types/warehouse";
 export function OrderDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [order, setOrder] = useState<WarehouseOrder | null>(null);
   const [plan, setPlan] = useState<PickPlan | null>(null);
   const [error, setError] = useState("");
@@ -32,7 +33,6 @@ export function OrderDetailPage() {
     setStartError("");
     try {
       await warehouseApi.startOrder(id);
-      savePickSession(createPickSession(id, order.order_code));
       navigate(`/orders/${id}/pick`);
     } catch (reason) {
       setStartError(getErrorMessage(reason));
@@ -43,6 +43,10 @@ export function OrderDetailPage() {
 
   if (error) return <div className="pt-6"><ErrorState message={error} retry={load} /></div>;
   if (!order || !plan) return <div className="pt-6"><LoadingState label="Sipariş hazırlanıyor" /></div>;
+
+  const lockedByOther = order.status === "Toplanıyor" && Boolean(order.picker?.user_id) && order.picker?.user_id !== user?.id;
+  const shortageBlocksStart = order.status !== "Toplanıyor" && plan.shortages.length > 0;
+  const blocked = plan.items.length === 0 || plan.unresolved_items.length > 0 || shortageBlocksStart || lockedByOther;
 
   return (
     <div className="space-y-4 pt-4">
@@ -56,6 +60,7 @@ export function OrderDetailPage() {
       </section>
 
       <ShortageAlert shortages={plan.shortages} />
+      {lockedByOther && <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 font-black text-amber-900" role="alert">Bu sipariş {order.picker?.name || "başka bir kullanıcı"} tarafından toplanıyor.</div>}
       {plan.unresolved_items.length > 0 && (
         <div className="flex gap-3 rounded-2xl border border-danger/20 bg-red-50 p-4 text-danger" role="alert"><TriangleAlert className="shrink-0"/><div><strong className="block">Çözümlenemeyen ürün var</strong><span className="text-sm">{plan.unresolved_items.length} sipariş satırı toplama planına eklenemedi.</span></div></div>
       )}
@@ -73,7 +78,7 @@ export function OrderDetailPage() {
       </section>
 
       {startError && <p className="rounded-xl bg-red-50 p-3 text-sm font-bold text-danger" role="alert">{startError}</p>}
-      <button className="primary-button sticky bottom-4 w-full shadow-xl" disabled={starting || plan.items.length === 0 || plan.unresolved_items.length > 0} onClick={start}>
+      <button className="primary-button sticky bottom-4 w-full shadow-xl" disabled={starting || blocked} onClick={start}>
         <Play size={22} fill="currentColor" /> {starting ? "Başlatılıyor..." : order.status === "Toplanıyor" ? "Toplamaya Devam Et" : "Toplamayı Başlat"}
       </button>
     </div>
