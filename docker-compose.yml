@@ -1,0 +1,12 @@
+services:
+  dsdst-warehouse:
+    container_name: dsdst-warehouse
+    build:
+      context: .
+    environment:
+      PANEL_API_BASE_URL: ${PANEL_API_BASE_URL}
+      WAREHOUSE_API_KEY: ${WAREHOUSE_API_KEY}
+      PORT: 3006
+    ports:
+      - "3006:3006"
+    restart: unless-stopped
