@@ -16,6 +16,7 @@ export function PickingPage() {
   const [busy, setBusy] = useState(false);
   const [quantity, setQuantity] = useState("");
   const [verifiedProductId, setVerifiedProductId] = useState<string | null>(null);
+  const [note, setNote] = useState("");
 
   const load = async () => {
     setLoadError("");
@@ -90,7 +91,8 @@ export function PickingPage() {
     setBusy(true);
     setFeedback(null);
     try {
-      await warehouseApi.completeOrder(id);
+      if (note.trim()) await warehouseApi.completeOrder(id, note);
+      else await warehouseApi.completeOrder(id);
       const { orders } = await warehouseApi.listOrders(1, 1);
       if (orders[0]) {
         navigate(`/orders/${orders[0].id}`, { replace: true });
@@ -120,6 +122,10 @@ export function PickingPage() {
         <div className="mt-6"><PickProgress current={completedCount} total={plan.items.length}/></div>
       </section>
       {feedback && <Feedback {...feedback} />}
+      <label className="mt-4 block text-left text-sm font-black" htmlFor="pick-note">
+        Operasyon notu <span className="font-semibold text-muted">(isteğe bağlı)</span>
+        <textarea id="pick-note" className="field mt-2 min-h-24 resize-y font-normal" maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Paketleme ekibi için not..." disabled={busy}/>
+      </label>
       <button className="primary-button mt-4 w-full" onClick={complete} disabled={!allComplete || busy}><CheckCircle2 size={22}/>{busy ? "Tamamlanıyor..." : "Siparişi Tamamla"}</button>
     </div>
   );

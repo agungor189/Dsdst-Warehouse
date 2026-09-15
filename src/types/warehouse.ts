@@ -101,3 +101,82 @@ export interface Pagination {
   total: number;
   total_pages: number;
 }
+
+export type PickSessionStatus = "WAITING" | "PICKING" | "PICKED" | "PACKING" | "PACKED" | "SHIPPED" | "CANCELLED";
+
+export interface PickSessionUser {
+  user_id: string;
+  name: string;
+}
+
+export interface PickSessionSummary {
+  id: string;
+  pick_number: string;
+  order_id: string;
+  order_code: string | null;
+  external_order_id: string | null;
+  status: PickSessionStatus;
+  started_by: PickSessionUser;
+  completed_by: PickSessionUser;
+  started_at: string;
+  completed_at: string;
+  total_product_types: number;
+  total_sale_product_quantity: number;
+  total_physical_item_quantity: number;
+  total_net_weight_g: number;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PickSessionComponent {
+  component_product_id: string | null;
+  component_sku_snapshot: string;
+  component_name_snapshot: string;
+  quantity_per_product: number;
+  picked_product_quantity: number;
+  total_component_quantity: number;
+  unit_weight_g_snapshot: number;
+  total_weight_g: number;
+}
+
+export interface PickSessionItem {
+  id: string;
+  product_id: string | null;
+  sku_snapshot: string;
+  product_name_snapshot: string;
+  product_type_snapshot: string;
+  ordered_quantity: number;
+  picked_quantity: number;
+  unit_weight_g_snapshot: number;
+  total_weight_g: number;
+  total_component_quantity: number;
+  components: PickSessionComponent[];
+}
+
+export interface PickSessionDetail extends PickSessionSummary {
+  items: PickSessionItem[];
+}
+
+export interface PickHistorySummary {
+  completed_pick_count: number;
+  total_sale_product_quantity: number;
+  total_physical_item_quantity: number;
+  total_net_weight_g: number;
+  by_user: Array<PickSessionUser & {
+    completed_pick_count: number;
+    total_physical_item_quantity: number;
+  }>;
+}
+
+export interface PickHistoryFilters {
+  date_from?: string;
+  date_to?: string;
+  summary_from: string;
+  summary_to: string;
+  picker_user_id?: string;
+  sku?: string;
+  product_name?: string;
+  order_number?: string;
+  status?: PickSessionStatus;
+}

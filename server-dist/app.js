@@ -53,6 +53,10 @@ const safePositiveInteger = (value, fallback, max) => {
         return fallback;
     return max ? Math.min(number, max) : number;
 };
+const safeQueryText = (value, maxLength = 120) => {
+    const source = Array.isArray(value) ? value[0] : value;
+    return typeof source === "string" ? source.trim().slice(0, maxLength) : "";
+};
 const configError = (config) => {
     if (!config.panelApiBaseUrl || !config.warehouseApiKey)
         return "missing";
@@ -257,6 +261,29 @@ export function createWarehouseApp(config) {
     app.get("/api/orders/:id/pick-plan", requireSession, (req, res) => forward(req, res, "GET", `/orders/${encodeURIComponent(String(req.params.id))}/pick-plan`));
     app.get("/api/scan/:code", requireSession, (req, res) => forward(req, res, "GET", `/scan/${encodeURIComponent(String(req.params.code))}`));
     app.get("/api/products/:id/image", requireSession, (req, res) => forward(req, res, "GET", `/products/${encodeURIComponent(String(req.params.id))}/image`, undefined, undefined, true));
+    app.get("/api/pick-history", requireSession, (req, res) => {
+        const query = new URLSearchParams({
+            page: String(safePositiveInteger(req.query.page, 1)),
+            limit: String(safePositiveInteger(req.query.limit, 25, 100)),
+        });
+        for (const [key, maxLength] of Object.entries({
+            date_from: 40,
+            date_to: 40,
+            summary_from: 40,
+            summary_to: 40,
+            picker_user_id: 80,
+            sku: 120,
+            product_name: 120,
+            order_number: 120,
+            status: 20,
+        })) {
+            const value = safeQueryText(req.query[key], maxLength);
+            if (value)
+                query.set(key, value);
+        }
+        return forward(req, res, "GET", "/pick-history", query);
+    });
+    app.get("/api/pick-history/:id", requireSession, (req, res) => forward(req, res, "GET", `/pick-history/${encodeURIComponent(String(req.params.id))}`));
     app.post("/api/orders/:id/start", requireSession, (req, res) => forward(req, res, "POST", `/orders/${encodeURIComponent(String(req.params.id))}/start`));
     app.post("/api/orders/:id/verify-pick", requireSession, (req, res) => {
         const productId = typeof req.body?.product_id === "string" ? req.body.product_id.trim() : "";
@@ -276,7 +303,10 @@ export function createWarehouseApp(config) {
         }
         return forward(req, res, "POST", `/orders/${encodeURIComponent(String(req.params.id))}/pick-items/${encodeURIComponent(String(req.params.productId))}/complete`, undefined, { picked_quantity: pickedQuantity });
     });
-    app.post("/api/orders/:id/complete", requireSession, (req, res) => forward(req, res, "POST", `/orders/${encodeURIComponent(String(req.params.id))}/complete`));
+    app.post("/api/orders/:id/complete", requireSession, (req, res) => {
+        const note = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 2000) : "";
+        return forward(req, res, "POST", `/orders/${encodeURIComponent(String(req.params.id))}/complete`, undefined, note ? { note } : {});
+    });
     app.use("/api", (_req, res) => res.status(404).json({
         success: false,
         error: { code: "BFF_ROUTE_NOT_FOUND", message: "Warehouse API yolu bulunamadı." },

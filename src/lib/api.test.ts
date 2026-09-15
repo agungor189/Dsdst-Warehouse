@@ -55,4 +55,31 @@ describe("Warehouse API client", () => {
     await expect(warehouseApi.completeOrder("order-1")).rejects.toMatchObject({ code: "OFFLINE" });
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it("toplama geçmişi filtrelerini aynı-origin BFF rotasına taşır", async () => {
+    vi.mocked(fetch).mockImplementation(() => response({
+      success: true,
+      data: [],
+      pagination: { page: 1, limit: 100, total: 0, total_pages: 0 },
+      summary: { completed_pick_count: 0, total_sale_product_quantity: 0, total_physical_item_quantity: 0, total_net_weight_g: 0, by_user: [] },
+      filters: { users: [] },
+    }));
+    await warehouseApi.listPickHistory({
+      date_from: "2026-09-15T00:00:00.000Z",
+      date_to: "2026-09-16T00:00:00.000Z",
+      summary_from: "2026-09-15T00:00:00.000Z",
+      summary_to: "2026-09-16T00:00:00.000Z",
+      sku: "KIT-001",
+    });
+    expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/pick-history\?.*sku=KIT-001/), expect.anything());
+  });
+
+  it("tamamlama notunu JSON body ile gönderir", async () => {
+    vi.mocked(fetch).mockImplementation(() => response({ success: true, data: { ...pickPlan.order, status: "Toplandı" } }));
+    await warehouseApi.completeOrder("order-1", "Kırılabilir");
+    expect(fetch).toHaveBeenCalledWith("/api/orders/order-1/complete", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ note: "Kırılabilir" }),
+    }));
+  });
 });

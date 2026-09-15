@@ -7,6 +7,7 @@ import { PickingPage } from "./pages/PickingPage";
 import { SuccessPage } from "./pages/SuccessPage";
 import { AuthProvider, useAuth } from "./features/auth/AuthContext";
 import { LoginPage } from "./pages/LoginPage";
+import { PickHistoryPage } from "./pages/PickHistoryPage";
 
 function AuthenticatedApp() {
   const { user, loading } = useAuth();
@@ -20,6 +21,7 @@ function AuthenticatedApp() {
         <Route path="/orders/:id" element={<OrderDetailPage />} />
         <Route path="/orders/:id/pick" element={<PickingPage />} />
         <Route path="/orders/:id/success" element={<SuccessPage />} />
+        <Route path="/history" element={<PickHistoryPage />} />
       </Routes>
     </AppShell>
   );

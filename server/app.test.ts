@@ -175,6 +175,33 @@ describe("Warehouse BFF", () => {
     expect(receivedBody).toEqual({ product_id: "p1", code: "SKU-1" });
   });
 
+  it("toplama geçmişi için yalnız whitelist filtrelerini ve sınırlandırılmış sayfalama değerlerini aktarır", async () => {
+    let receivedQuery: unknown;
+    const panelUrl = await startPanel((req, res) => {
+      receivedQuery = req.query;
+      res.json({ success: true, data: [], pagination: { page: 2, limit: 100, total: 0, total_pages: 0 } });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .get("/api/pick-history?page=2&limit=500&sku=KIT-001&status=PICKED&admin=true")
+      .set("Cookie", sessionCookie);
+    expect(response.status).toBe(200);
+    expect(receivedQuery).toEqual({ page: "2", limit: "100", sku: "KIT-001", status: "PICKED" });
+  });
+
+  it("tamamlama notunu kırpar ve bilinmeyen body alanlarını panele göndermez", async () => {
+    let receivedBody: unknown;
+    const panelUrl = await startPanel((req, res) => {
+      receivedBody = req.body;
+      res.json({ success: true, data: { id: "order-1", status: "Toplandı" } });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .post("/api/orders/order-1/complete")
+      .set("Cookie", sessionCookie)
+      .send({ note: "  Kırılabilir  ", role: "admin" });
+    expect(response.status).toBe(200);
+    expect(receivedBody).toEqual({ note: "Kırılabilir" });
+  });
+
   it("logout oturum cookie'sini temizler", async () => {
     const response = await request(createWarehouseApp({ panelApiBaseUrl: "http://panel.test", warehouseApiKey: SECRET }))
       .post("/api/auth/logout").set("Cookie", sessionCookie);

@@ -9,7 +9,7 @@ Browser/PWA → aynı origin /api → Warehouse Express BFF → Panel Warehouse 
                  └─ HttpOnly JWT         └─ x-api-key + panel JWT yalnızca burada eklenir
 ```
 
-Browser hiçbir API anahtarı, panel adresi veya JavaScript tarafından okunabilir JWT bilmez. Login sonucu BFF tarafından `HttpOnly`, `SameSite=Strict` cookie'ye çevrilir. BFF yalnızca tanımlı auth, sipariş, pick-plan, doğrulama, ürün-adet tamamlama ve ürün görseli rotalarını kabul eder; genel amaçlı proxy değildir. Panel yanıtları önbelleğe alınmaz, anahtar/token içeren alanlar veya metinler frontend'e dönmeden redakte edilir.
+Browser hiçbir API anahtarı, panel adresi veya JavaScript tarafından okunabilir JWT bilmez. Login sonucu BFF tarafından `HttpOnly`, `SameSite=Strict` cookie'ye çevrilir. BFF yalnızca tanımlı auth, sipariş, pick-plan, doğrulama, ürün-adet tamamlama, toplama geçmişi ve ürün görseli rotalarını kabul eder; genel amaçlı proxy değildir. Panel yanıtları önbelleğe alınmaz, anahtar/token içeren alanlar veya metinler frontend'e dönmeden redakte edilir.
 
 ## Yerel geliştirme
 
@@ -55,3 +55,9 @@ npm run build
 Service worker yalnızca uygulama kabuğunu önbelleğe alır. Warehouse API istekleri önbelleğe alınmaz; çevrimdışı yazma işlemleri engellenir. Login paneldeki mevcut kullanıcı adı/e-posta ve şifre ile yapılır; ayrı Warehouse kullanıcısı oluşturulmaz.
 
 `npm run build` sonrasında frontend çıktısı ayrıca API anahtarı ve yasaklı env adları için taranır.
+
+## Toplama geçmişi
+
+Ana sayfadaki **Toplama Geçmişi** bağlantısı tamamlanan toplama oturumlarını gösterir. Bugün, dün, son 7 gün ve özel tarih aralığı yanında kullanıcı, SKU, ürün adı, sipariş/toplama numarası ve durum filtreleri bulunur. Özet kartları ve kullanıcı bazlı günlük operasyon özeti her zaman bugünün yerel gün sınırlarıyla hesaplanır.
+
+Sipariş tamamlanırken isteğe bağlı operasyon notu Panel API'ye gönderilir. Kalıcı session/item/component snapshot'ı, ağırlık hesapları ve duplicate koruması Panel repository'sindeki tek transaction içinde uygulanır; Warehouse uygulaması bu kayıtları yalnız okur ve silme rotası sunmaz.

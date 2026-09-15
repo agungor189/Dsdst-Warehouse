@@ -4,12 +4,19 @@ import type {
   AuthUser,
   WarehouseOrder,
   WarehouseOrderSummary,
+  PickHistoryFilters,
+  PickHistorySummary,
+  PickSessionDetail,
+  PickSessionSummary,
+  PickSessionUser,
 } from "../types/warehouse";
 
 interface ApiEnvelope<T> {
   success: boolean;
   data: T;
   pagination?: Pagination;
+  summary?: PickHistorySummary;
+  filters?: { users: PickSessionUser[] };
   idempotent?: boolean;
   error?: { code?: string; message?: string };
 }
@@ -92,8 +99,27 @@ export const warehouseApi = {
       { method: "POST", body: JSON.stringify({ picked_quantity: pickedQuantity }) },
     )).data;
   },
-  async completeOrder(id: string) {
-    return (await request<PickPlan["order"]>(`/orders/${encodeURIComponent(id)}/complete`, { method: "POST" })).data;
+  async completeOrder(id: string, note?: string) {
+    return (await request<PickPlan["order"]>(`/orders/${encodeURIComponent(id)}/complete`, {
+      method: "POST",
+      body: JSON.stringify({ note: note?.trim() || undefined }),
+    })).data;
+  },
+  async listPickHistory(filters: PickHistoryFilters, page = 1, limit = 100) {
+    const query = new URLSearchParams({ page: String(page), limit: String(limit) });
+    for (const [key, value] of Object.entries(filters)) {
+      if (value) query.set(key, value);
+    }
+    const result = await request<PickSessionSummary[]>(`/pick-history?${query.toString()}`);
+    return {
+      sessions: result.data,
+      pagination: result.pagination!,
+      summary: result.summary!,
+      users: result.filters?.users || [],
+    };
+  },
+  async getPickHistory(id: string) {
+    return (await request<PickSessionDetail>(`/pick-history/${encodeURIComponent(id)}`)).data;
   },
 };
 

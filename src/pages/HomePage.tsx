@@ -1,4 +1,4 @@
-import { ArrowRight, CircleCheck, CircleX, PackageCheck, Play } from "lucide-react";
+import { ArrowRight, CircleCheck, CircleX, History, PackageCheck, Play } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../features/auth/AuthContext";
@@ -39,6 +39,14 @@ export function HomePage() {
           <span className="font-black text-amber-900">Devam et</span>
         </Link>
       )}
+
+      <Link to="/history" className="flex min-h-20 items-center justify-between rounded-2xl border border-line bg-white p-4 shadow-sm transition active:scale-[0.99]">
+        <span className="flex items-center gap-3">
+          <span className="grid size-11 place-items-center rounded-xl bg-emerald-100 text-moss"><History size={22}/></span>
+          <span><span className="block font-black">Toplama Geçmişi</span><span className="mt-0.5 block text-xs font-semibold text-muted">Tamamlanan toplama ve BOM kayıtları</span></span>
+        </span>
+        <ArrowRight className="text-muted"/>
+      </Link>
 
       <div className="grid grid-cols-2 gap-3">
         <div className="metric-card">
