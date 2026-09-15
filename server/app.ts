@@ -354,8 +354,35 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
       rows: Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 5000) : [],
       preview_hash: safeQueryText(req.body?.preview_hash, 128),
     }));
-  app.post("/api/admin/packages/claim-next", requireSession, (req, res) =>
-    forward(req, res, "POST", "/admin/packages/claim-next", undefined, { supplier_code: safeQueryText(req.body?.supplier_code, 100) }));
+  app.get("/api/admin/receiving/lots/:lot", requireSession, (req, res) =>
+    forward(req, res, "GET", `/admin/receiving/lots/${encodeURIComponent(String(req.params.lot))}`));
+  app.get("/api/admin/receiving/sessions", requireSession, (req, res) =>
+    forward(req, res, "GET", "/admin/receiving/sessions"));
+  app.post("/api/admin/receiving/sessions", requireSession, (req, res) =>
+    forward(req, res, "POST", "/admin/receiving/sessions", undefined, {
+      lot_number: safeQueryText(req.body?.lot_number, 150),
+      device_id: safeQueryText(req.body?.device_id, 150),
+    }));
+  app.get("/api/admin/receiving/sessions/:id", requireSession, (req, res) =>
+    forward(req, res, "GET", `/admin/receiving/sessions/${encodeURIComponent(String(req.params.id))}`));
+  app.post("/api/admin/receiving/sessions/:id/state", requireSession, (req, res) =>
+    forward(req, res, "POST", `/admin/receiving/sessions/${encodeURIComponent(String(req.params.id))}/state`, undefined, {
+      state: safeQueryText(req.body?.state, 20),
+      device_id: safeQueryText(req.body?.device_id, 150),
+    }));
+  app.post("/api/admin/receiving/sessions/:id/complete", requireSession, (req, res) =>
+    forward(req, res, "POST", `/admin/receiving/sessions/${encodeURIComponent(String(req.params.id))}/complete`, undefined, {
+      force_reason: safeQueryText(req.body?.force_reason, 1000),
+      device_id: safeQueryText(req.body?.device_id, 150),
+    }));
+  app.post("/api/admin/packages/claim-next", requireSession, (req, res) => {
+    const body: Record<string, unknown> = { supplier_code: safeQueryText(req.body?.supplier_code, 100) };
+    const sessionId = safeQueryText(req.body?.session_id, 100);
+    const deviceId = safeQueryText(req.body?.device_id, 150);
+    if (sessionId) body.session_id = sessionId;
+    if (deviceId) body.device_id = deviceId;
+    return forward(req, res, "POST", "/admin/packages/claim-next", undefined, body);
+  });
   app.get("/api/admin/packages/by-code/:code", requireSession, (req, res) =>
     forward(req, res, "GET", `/admin/packages/by-code/${encodeURIComponent(String(req.params.code))}`));
   app.post("/api/admin/packages/:id/print", requireSession, (req, res) =>
@@ -365,7 +392,12 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     return forward(req, res, "GET", "/admin/print-jobs", query);
   });
   app.get("/api/admin/locations", requireSession, (req, res) => forward(req, res, "GET", "/admin/locations"));
-  app.get("/api/admin/locations/suggestion", requireSession, (req, res) => forward(req, res, "GET", "/admin/locations/suggestion"));
+  app.get("/api/admin/locations/suggestion", requireSession, (req, res) => {
+    const query = new URLSearchParams();
+    const packageId = safeQueryText(req.query.package_id, 100);
+    if (packageId) query.set("package_id", packageId);
+    return forward(req, res, "GET", "/admin/locations/suggestion", query);
+  });
   app.post("/api/admin/locations", requireSession, (req, res) => forward(req, res, "POST", "/admin/locations", undefined, safeAdminBody(req.body)));
   app.post("/api/admin/placements", requireSession, (req, res) => forward(req, res, "POST", "/admin/placements", undefined, safeAdminBody(req.body)));
   app.post("/api/admin/moves", requireSession, (req, res) => forward(req, res, "POST", "/admin/moves", undefined, safeAdminBody(req.body)));

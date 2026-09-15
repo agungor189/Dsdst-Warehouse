@@ -68,6 +68,6 @@ Toplama adımındaki **Kamera ile Tara** düğmesi cihazın arka kamerasıyla QR
 
 ## Warehouse Admin
 
-Yetkili kullanıcılar ana sayfadaki **Warehouse Admin** kartından mal kabul, etiketleme, paket yerleştirme, taşıma, lokasyon, sayım, baskı geçmişi ve merkezi şablon ekranlarına ulaşır. CSV/master dosyası önce tarayıcıda okunup Panel API'de kuru çalıştırılır; kullanıcı onayından önce DB'ye satır veya paket yazılmaz. Etiketleme ve tüm iki adımlı paket/lokasyon ekranları manuel girişin yanında aynı kamera tarayıcısını kullanır.
+Yetkili kullanıcılar ana sayfadaki **Warehouse Admin** kartından mal kabul, etiketleme, paket yerleştirme, taşıma, lokasyon, sayım, baskı geçmişi ve merkezi şablon ekranlarına ulaşır. Mal Kabul ekranına CSV yüklenmez: kullanıcı Panel ürün master importunda tanımlanmış lotu girer, ortak server-side oturuma katılır ve tedarikçi no → etiket → önerilen lokasyon → raf okutma akışını tamamlar. Aktif oturum ve ilerleme kontrollü polling ile telefon, tablet ve PC'de ortak görünür; refresh işlem durumunu kaybettirmez. Etiketleme ve tüm paket/lokasyon adımları manuel girişin yanında aynı kamera tarayıcısını kullanır.
 
 Erişim menüde gizlenmekle kalmaz: Panel API her işlem için ilgili `warehouse:*` kullanıcı yetkisini ayrıca kontrol eder. `admin` rolü tüm Warehouse Admin izinlerine sahiptir.

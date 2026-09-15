@@ -194,6 +194,23 @@ describe("Warehouse BFF", () => {
     });
   });
 
+  it("lot session başlangıcında yalnız lot ve cihaz kimliğini Panel'e aktarır", async () => {
+    let received: { path?: string; body?: unknown } = {};
+    const panelUrl = await startPanel((req, res) => {
+      received = { path: req.path, body: req.body };
+      res.json({ success: true, data: { id: "session-1", lot_number: "LOT-1", receiving_state: "active" } });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .post("/api/admin/receiving/sessions")
+      .set("Cookie", sessionCookie)
+      .send({ lot_number: " LOT-1 ", device_id: " phone-1 ", supplier_code: "leak", role: "admin" });
+    expect(response.status).toBe(200);
+    expect(received).toEqual({
+      path: "/api/warehouse/v1/admin/receiving/sessions",
+      body: { lot_number: "LOT-1", device_id: "phone-1" },
+    });
+  });
+
   it("toplama geçmişi için yalnız whitelist filtrelerini ve sınırlandırılmış sayfalama değerlerini aktarır", async () => {
     let receivedQuery: unknown;
     const panelUrl = await startPanel((req, res) => {

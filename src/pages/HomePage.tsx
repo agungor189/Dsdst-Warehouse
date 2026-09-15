@@ -2,12 +2,13 @@ import { ArrowRight, CircleCheck, CircleX, History, PackageCheck, Play, Settings
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { hasWarehousePermission, useAuth } from "../features/auth/AuthContext";
-import { getErrorMessage, warehouseApi } from "../lib/api";
-import type { WarehouseOrderSummary } from "../types/warehouse";
+import { getErrorMessage, warehouseAdminApi, warehouseApi } from "../lib/api";
+import type { ReceivingSession, WarehouseOrderSummary } from "../types/warehouse";
 
 export function HomePage() {
   const { user } = useAuth();
   const [state, setState] = useState<{ total?: number; activeOrder?: WarehouseOrderSummary; error?: string }>({});
+  const [activeReceiving, setActiveReceiving] = useState<ReceivingSession | null>(null);
   const canUseAdmin = ["warehouse:receive", "warehouse:print_labels", "warehouse:place_packages", "warehouse:move_stock", "warehouse:manage_locations", "warehouse:count_stock"]
     .some((permission) => hasWarehousePermission(user, permission as Parameters<typeof hasWarehousePermission>[1]));
 
@@ -19,6 +20,15 @@ export function HomePage() {
       }))
       .catch((error) => setState({ error: getErrorMessage(error) }));
   }, [user?.id]);
+  useEffect(() => {
+    if (!hasWarehousePermission(user, "warehouse:receive")) return;
+    const load = () => warehouseAdminApi.listReceivingSessions()
+      .then((sessions) => setActiveReceiving(sessions.find((session) => ["active", "paused"].includes(session.receiving_state)) || null))
+      .catch(() => setActiveReceiving(null));
+    void load();
+    const timer = window.setInterval(load, 5_000);
+    return () => window.clearInterval(timer);
+  }, [user]);
 
   return (
     <div className="space-y-5 pt-4">
@@ -41,6 +51,8 @@ export function HomePage() {
           <span className="font-black text-amber-900">Devam et</span>
         </Link>
       )}
+
+      {activeReceiving && <Link to="/admin/inbound" className="flex min-h-20 items-center justify-between rounded-2xl border-2 border-lime-300 bg-lime-50 p-4 transition active:scale-[0.99]"><span className="flex items-center gap-3"><span className="grid size-11 place-items-center rounded-xl bg-acid text-forest"><PackageCheck size={22}/></span><span><span className="block text-xs font-bold text-moss">Aktif Mal Kabul</span><span className="block font-black">{activeReceiving.lot_number}</span></span></span><span className="font-black text-forest">{activeReceiving.placed_count || 0}/{activeReceiving.expected_package_count} paket</span></Link>}
 
       <Link to="/history" className="flex min-h-20 items-center justify-between rounded-2xl border border-line bg-white p-4 shadow-sm transition active:scale-[0.99]">
         <span className="flex items-center gap-3">

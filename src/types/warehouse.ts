@@ -34,8 +34,55 @@ export interface InboundBatch {
   package_status_counts?: Array<{ status: string; count: number }>;
 }
 
+export interface ReceivingLine {
+  id: string;
+  sku_snapshot: string;
+  product_name_snapshot: string;
+  supplier_code: string;
+  name_tr_snapshot: string | null;
+  name_en_snapshot: string | null;
+  material_snapshot: string | null;
+  size_snapshot: string | null;
+  image_path_snapshot: string | null;
+  expected_package_count: number;
+  completed_packages: number;
+  total_units: number;
+  received_quantity: number;
+  units_per_package: number;
+  package_weight_kg_snapshot: number;
+}
+
+export interface ReceivingSession extends Omit<InboundBatch, "lines"> {
+  lot_number: string;
+  receiving_state: "active" | "paused" | "completed" | "cancelled";
+  started_at: string;
+  completed_at: string | null;
+  started_by_name?: string | null;
+  sku_count?: number;
+  total_weight_kg?: number;
+  actor_names?: string | null;
+  resumed?: boolean;
+  lines: ReceivingLine[];
+  events?: Array<Record<string, unknown>>;
+  progress: {
+    sku_count: number;
+    total_packages: number;
+    placed_packages: number;
+    remaining_packages: number;
+    percent: number;
+  };
+}
+
+export interface ReceivingLot {
+  lot_number: string;
+  lines: Array<Record<string, unknown>>;
+  totals: { sku_count: number; package_count: number; unit_count: number; weight_kg: number };
+}
+
 export interface WarehousePackage {
   id: string;
+  product_id: string;
+  supplier_code: string;
   package_code: string;
   status: string;
   batch_number: string;
@@ -47,6 +94,15 @@ export interface WarehousePackage {
   planned_quantity: number;
   remaining_quantity: number;
   location_code: string | null;
+  recommended_location_code?: string | null;
+  supplier_no_snapshot?: string | null;
+  name_tr_snapshot?: string | null;
+  name_en_snapshot?: string | null;
+  material_snapshot?: string | null;
+  size_snapshot?: string | null;
+  unit_weight_g_snapshot?: number;
+  package_weight_kg_snapshot?: number;
+  image_path_snapshot?: string | null;
   claim_token: string | null;
   claim_expires_at: string | null;
   claim_lease_seconds: number;

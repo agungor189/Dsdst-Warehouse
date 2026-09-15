@@ -14,6 +14,7 @@ import type {
   WarehouseLocation,
   ImportPreview,
 } from "../types/warehouse";
+import type { ReceivingLot, ReceivingSession } from "../types/warehouse";
 
 interface ApiEnvelope<T> {
   success: boolean;
@@ -145,6 +146,15 @@ export const authApi = {
 const post = async <T>(path: string, body: Record<string, unknown>) =>
   (await request<T>(path, { method: "POST", body: JSON.stringify(body) })).data;
 
+const warehouseDeviceId = () => {
+  const key = "dsdst-warehouse-device-id";
+  const existing = sessionStorage.getItem(key);
+  if (existing) return existing;
+  const created = crypto.randomUUID();
+  sessionStorage.setItem(key, created);
+  return created;
+};
+
 export const warehouseAdminApi = {
   async listBatches() { return (await request<InboundBatch[]>("/admin/batches")).data; },
   async getBatch(id: string) { return (await request<InboundBatch>(`/admin/batches/${encodeURIComponent(id)}`)).data; },
@@ -157,8 +167,26 @@ export const warehouseAdminApi = {
   async applyImport(id: string, rows: Array<Record<string, unknown>>, previewHash: string) {
     return post<InboundBatch>(`/admin/batches/${encodeURIComponent(id)}/import/apply`, { rows, preview_hash: previewHash });
   },
-  async claimNext(supplierCode: string) {
-    return post<WarehousePackage>("/admin/packages/claim-next", { supplier_code: supplierCode });
+  async getLot(lotNumber: string) {
+    return (await request<ReceivingLot>(`/admin/receiving/lots/${encodeURIComponent(lotNumber)}`)).data;
+  },
+  async listReceivingSessions() {
+    return (await request<ReceivingSession[]>("/admin/receiving/sessions")).data;
+  },
+  async startReceivingSession(lotNumber: string) {
+    return post<ReceivingSession>("/admin/receiving/sessions", { lot_number: lotNumber, device_id: warehouseDeviceId() });
+  },
+  async getReceivingSession(id: string) {
+    return (await request<ReceivingSession>(`/admin/receiving/sessions/${encodeURIComponent(id)}`)).data;
+  },
+  async setReceivingState(id: string, state: "active" | "paused" | "cancelled") {
+    return post<ReceivingSession>(`/admin/receiving/sessions/${encodeURIComponent(id)}/state`, { state, device_id: warehouseDeviceId() });
+  },
+  async completeReceivingSession(id: string, forceReason?: string) {
+    return post<ReceivingSession>(`/admin/receiving/sessions/${encodeURIComponent(id)}/complete`, { force_reason: forceReason, device_id: warehouseDeviceId() });
+  },
+  async claimNext(supplierCode: string, sessionId?: string) {
+    return post<WarehousePackage>("/admin/packages/claim-next", { supplier_code: supplierCode, session_id: sessionId, device_id: warehouseDeviceId() });
   },
   async getPackage(code: string) {
     return (await request<WarehousePackage>(`/admin/packages/by-code/${encodeURIComponent(code)}`)).data;
@@ -167,14 +195,15 @@ export const warehouseAdminApi = {
     return post<{ package: WarehousePackage; job: Record<string, unknown>; idempotent: boolean }>(`/admin/packages/${encodeURIComponent(packageId)}/print`, {
       claim_token: claimToken || undefined,
       idempotency_key: crypto.randomUUID(),
+      device_id: warehouseDeviceId(),
     });
   },
   async listPrintJobs() { return (await request<Array<Record<string, unknown>>>("/admin/print-jobs?limit=200")).data; },
   async listLocations() { return (await request<WarehouseLocation[]>("/admin/locations")).data; },
-  async suggestLocation() { return (await request<WarehouseLocation>("/admin/locations/suggestion")).data; },
+  async suggestLocation(packageId?: string) { return (await request<WarehouseLocation>(`/admin/locations/suggestion${packageId ? `?package_id=${encodeURIComponent(packageId)}` : ""}`)).data; },
   async createLocation(input: Record<string, unknown>) { return post<WarehouseLocation>("/admin/locations", input); },
-  async placePackage(packageCode: string, locationCode: string) {
-    return post<{ package: WarehousePackage }>("/admin/placements", { package_code: packageCode, location_code: locationCode, idempotency_key: crypto.randomUUID() });
+  async placePackage(packageCode: string, locationCode: string, overrideReason?: string) {
+    return post<{ package: WarehousePackage }>("/admin/placements", { package_code: packageCode, location_code: locationCode, override_reason: overrideReason, device_id: warehouseDeviceId(), idempotency_key: crypto.randomUUID() });
   },
   async movePackage(packageCode: string, locationCode: string) {
     return post<{ package: WarehousePackage }>("/admin/moves", { package_code: packageCode, location_code: locationCode, idempotency_key: crypto.randomUUID() });

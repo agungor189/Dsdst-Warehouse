@@ -1,12 +1,12 @@
 import {
-  Boxes, ClipboardCheck, FileUp, MapPin, Move, PackageCheck, Printer, RefreshCw, Scale, Settings2,
+  Boxes, CheckCircle2, ClipboardCheck, MapPin, Move, PackageCheck, Pause, Play, Printer, RefreshCw, Scale, Settings2,
 } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ScanInput } from "../features/picking/ScanInput";
 import { hasWarehousePermission, useAuth } from "../features/auth/AuthContext";
-import { getErrorMessage, warehouseAdminApi } from "../lib/api";
-import type { ImportPreview, InboundBatch, WarehouseLocation, WarehousePackage, WarehousePermission } from "../types/warehouse";
+import { ApiError, getErrorMessage, warehouseAdminApi } from "../lib/api";
+import type { ReceivingSession, WarehouseLocation, WarehousePackage, WarehousePermission } from "../types/warehouse";
 
 const permissionLabels: Record<WarehousePermission, string> = {
   "warehouse:receive": "Mal Kabul",
@@ -35,7 +35,7 @@ export function PermissionPage({ permission, children }: { permission: Warehouse
 }
 
 const adminCards: Array<{ to: string; permission: WarehousePermission; title: string; description: string; icon: typeof Boxes }> = [
-  { to: "/admin/inbound", permission: "warehouse:receive", title: "Mal Kabul", description: "Parti oluştur, dosyayı önizle ve paketleri hazırla", icon: FileUp },
+  { to: "/admin/inbound", permission: "warehouse:receive", title: "Mal Kabul", description: "Lot seç, etiketi bas ve paketi yerine koy", icon: PackageCheck },
   { to: "/admin/labeling", permission: "warehouse:print_labels", title: "Etiketleme", description: "Tedarikçi koduyla sıradaki paketi ayır ve bas", icon: Printer },
   { to: "/admin/placement", permission: "warehouse:place_packages", title: "Yerleştirme", description: "Paket ve lokasyonu sırayla okut", icon: PackageCheck },
   { to: "/admin/move", permission: "warehouse:move_stock", title: "Ürün Taşıma", description: "Paketin lokasyonunu güvenle değiştir", icon: Move },
@@ -78,42 +78,118 @@ export function parseDelimitedText(source: string): Array<Record<string, string>
 }
 
 export function InboundPage() {
-  const [batches, setBatches] = useState<InboundBatch[]>([]);
-  const [selected, setSelected] = useState<InboundBatch | null>(null);
-  const [supplierCode, setSupplierCode] = useState("");
-  const [supplierName, setSupplierName] = useState("");
-  const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
-  const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const { user } = useAuth();
+  const [sessions, setSessions] = useState<ReceivingSession[]>([]);
+  const [selected, setSelected] = useState<ReceivingSession | null>(null);
+  const [lotNumber, setLotNumber] = useState("");
+  const [pkg, setPkg] = useState<WarehousePackage | null>(null);
+  const [suggestion, setSuggestion] = useState<WarehouseLocation | null>(null);
+  const [forceReason, setForceReason] = useState("");
+  const [overrideLocation, setOverrideLocation] = useState("");
+  const [overrideReason, setOverrideReason] = useState("");
+  const [scanCycle, setScanCycle] = useState(0);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const reload = () => warehouseAdminApi.listBatches().then(setBatches).catch((reason) => setError(getErrorMessage(reason)));
-  useEffect(() => { void reload(); }, []);
-  const create = async (event: FormEvent) => {
-    event.preventDefault(); setBusy(true); setError("");
-    try { const batch = await warehouseAdminApi.createBatch({ supplier_code: supplierCode, supplier_name: supplierName }); setSelected(batch); setSupplierCode(""); setSupplierName(""); setMessage(`${batch.batch_number} oluşturuldu.`); reload(); }
+  const refreshSessions = async () => {
+    try {
+      const next = await warehouseAdminApi.listReceivingSessions();
+      setSessions(next);
+      if (selected) {
+        const detail = await warehouseAdminApi.getReceivingSession(selected.id);
+        setSelected(detail);
+      }
+    } catch (reason) { setError(getErrorMessage(reason)); }
+  };
+  useEffect(() => {
+    void refreshSessions();
+    const timer = window.setInterval(() => void refreshSessions(), 3_000);
+    return () => window.clearInterval(timer);
+  }, [selected?.id]);
+  useEffect(() => {
+    if (!pkg || !["LABEL_QUEUED", "PRINT_FAILED"].includes(pkg.status)) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const current = await warehouseAdminApi.getPackage(pkg.package_code);
+        setPkg(current);
+        if (current.status === "LABELED") setSuggestion(await warehouseAdminApi.suggestLocation(current.id));
+      } catch (reason) { setError(getErrorMessage(reason)); }
+    }, 2_000);
+    return () => window.clearInterval(timer);
+  }, [pkg?.id, pkg?.status]);
+  const start = async (event: FormEvent) => {
+    event.preventDefault(); setBusy(true); setError(""); setMessage("");
+    try {
+      const session = await warehouseAdminApi.startReceivingSession(lotNumber);
+      setSelected(session); setPkg(null); setSuggestion(null); setOverrideLocation(""); setLotNumber("");
+      setMessage(session.resumed ? "Bu parti için aktif mal kabul mevcut – devam ediliyor." : `${session.lot_number} mal kabulü başlatıldı.`);
+      await refreshSessions();
+    } catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); }
+  };
+  const openSession = async (id: string) => {
+    setBusy(true); setError(""); setPkg(null); setSuggestion(null); setOverrideLocation("");
+    try { setSelected(await warehouseAdminApi.getReceivingSession(id)); } catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); }
+  };
+  const claim = async (supplierCode: string) => {
+    if (!selected) return false;
+    setBusy(true); setError(""); setMessage("");
+    try { setPkg(await warehouseAdminApi.claimNext(supplierCode, selected.id)); setSuggestion(null); setOverrideLocation(""); return true; }
+    catch (reason) { setError(getErrorMessage(reason)); return false; } finally { setBusy(false); }
+  };
+  const print = async () => {
+    if (!pkg) return; setBusy(true); setError("");
+    try { const result = await warehouseAdminApi.queuePrint(pkg.id, pkg.claim_token); setPkg(result.package); setMessage("Etiket baskı kuyruğuna gönderildi."); }
     catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); }
   };
-  const readFile = async (file?: File) => {
-    if (!file) return;
-    const parsed = parseDelimitedText(await file.text());
-    setRows(parsed); setPreview(null); setMessage(`${parsed.length} veri satırı okundu; henüz veritabanına yazılmadı.`);
+  const placeAt = async (code: string, reason?: string) => {
+    if (!pkg || !suggestion) return false; setBusy(true); setError("");
+    try {
+      const result = await warehouseAdminApi.placePackage(pkg.package_code, code, reason);
+      setMessage(`✓ ${result.package.sku_snapshot} ${result.package.package_number}/${result.package.total_packages} yerleştirildi`);
+      setPkg(null); setSuggestion(null); setOverrideLocation(""); setOverrideReason(""); setScanCycle((value) => value + 1);
+      setSelected(await warehouseAdminApi.getReceivingSession(selected!.id));
+      return true;
+    } catch (failure) {
+      if (failure instanceof ApiError && failure.code === "WRONG_LOCATION" && hasWarehousePermission(user, "warehouse:move_stock")) setOverrideLocation(code);
+      setError(getErrorMessage(failure)); return false;
+    } finally { setBusy(false); }
   };
-  const runPreview = async () => {
+  const scanLocation = (code: string) => placeAt(code);
+  const changeState = async (state: "active" | "paused" | "cancelled") => {
     if (!selected) return; setBusy(true); setError("");
-    try { setPreview(await warehouseAdminApi.previewImport(selected.id, rows)); }
+    try { setSelected(await warehouseAdminApi.setReceivingState(selected.id, state)); setMessage(state === "active" ? "Mal kabul devam ediyor." : state === "paused" ? "Mal kabul duraklatıldı." : "Mal kabul iptal edildi."); }
     catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); }
   };
-  const apply = async () => {
-    if (!selected || !preview?.valid) return; setBusy(true); setError("");
-    try { const updated = await warehouseAdminApi.applyImport(selected.id, rows, preview.preview_hash); setSelected(updated); setPreview(null); setRows([]); setMessage(`${updated.expected_package_count} fiziksel paket oluşturuldu.`); reload(); }
+  const complete = async (force = false) => {
+    if (!selected) return; setBusy(true); setError("");
+    try { setSelected(await warehouseAdminApi.completeReceivingSession(selected.id, force ? forceReason : undefined)); setMessage("Mal kabul tamamlandı."); setForceReason(""); await refreshSessions(); }
     catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); }
   };
-  return <PermissionPage permission="warehouse:receive"><div className="space-y-5"><PageIntro eyebrow="Mal Kabul" title="Giriş partileri" description="Dosya önce sadece doğrulanır. Onay verdiğinizde ürün satırları ve fiziksel paketler tek transaction içinde oluşur."/>
+  const activeSessions = sessions.filter((session) => ["active", "paused"].includes(session.receiving_state));
+  const completedSessions = sessions.filter((session) => session.receiving_state === "completed");
+  return <PermissionPage permission="warehouse:receive"><div className="space-y-5"><PageIntro eyebrow="Mal Kabul" title="Lot bazlı kabul" description="Lot Panel master verisinden açılır; tüm cihazlar aynı server-side ilerlemeyi görür."/>
     {message && <Notice message={message}/>} {error && <Notice error message={error}/>}
-    <form onSubmit={create} className="space-y-3 rounded-2xl border border-line bg-white p-4"><h2 className="font-black">Yeni parti</h2><input className="field" value={supplierCode} onChange={(event) => setSupplierCode(event.target.value)} placeholder="Tedarikçi kodu" required/><input className="field" value={supplierName} onChange={(event) => setSupplierName(event.target.value)} placeholder="Tedarikçi adı (opsiyonel)"/><button className="primary-button w-full" disabled={busy}>Parti oluştur</button></form>
-    <section className="rounded-2xl border border-line bg-white p-4"><h2 className="font-black">Partiler</h2><div className="mt-3 space-y-2">{batches.map((batch) => <button key={batch.id} onClick={() => { setSelected(batch); setPreview(null); setRows([]); }} className={`w-full rounded-xl border p-3 text-left ${selected?.id === batch.id ? "border-moss bg-emerald-50" : "border-line"}`}><span className="font-black">{batch.batch_number}</span><span className="float-right text-xs font-black text-moss">{batch.status}</span><p className="mt-1 text-xs text-muted">{batch.supplier_code} · {batch.package_count ?? batch.expected_package_count} paket · {batch.placed_count || 0} yerleşti</p></button>)}</div></section>
-    {selected?.status === "DRAFT" && <section className="space-y-3 rounded-2xl border border-line bg-white p-4"><h2 className="font-black">CSV / master içe aktarımı</h2><p className="text-xs leading-5 text-muted">Desteklenen alanlar: SKU veya tedarikçi kodu, paket sayısı, paket içi adet, toplam adet ve lot. Virgül/noktalı virgül ve tırnaklı alanlar desteklenir.</p><input className="field" type="file" accept=".csv,text/csv" onChange={(event) => void readFile(event.target.files?.[0])}/><button className="secondary-button w-full" disabled={!rows.length || busy} onClick={() => void runPreview()}>Kuru çalıştır / önizle</button>{preview && <div className="rounded-xl bg-canvas p-3 text-sm"><b>{preview.totals.lines} satır · {preview.totals.packages} paket · {preview.totals.units} adet</b>{preview.errors.map((item) => <p key={`${item.source_row}-${item.code}`} className="mt-2 text-danger">Satır {item.source_row}: {item.message}</p>)}{preview.valid && <button className="primary-button mt-4 w-full" onClick={() => void apply()}>Onayla ve paketleri oluştur</button>}</div>}</section>}
+    <form onSubmit={start} className="space-y-3 rounded-2xl border border-line bg-white p-4"><h2 className="text-lg font-black">Yeni Mal Kabul Başlat</h2><input autoFocus className="field min-h-14 text-lg font-black uppercase" value={lotNumber} onChange={(event) => setLotNumber(event.target.value)} placeholder="LOT-2026-09-01" required/><button className="primary-button min-h-14 w-full text-lg" disabled={busy}>Lotu getir ve başlat</button></form>
+    {!!activeSessions.length && <section className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4"><h2 className="font-black text-amber-950">Aktif Mal Kabul</h2><div className="mt-3 space-y-2">{activeSessions.map((session) => <button key={session.id} onClick={() => void openSession(session.id)} className="w-full rounded-xl bg-white p-4 text-left shadow-sm"><b>{session.lot_number}</b><span className="float-right text-sm font-black text-amber-800">{session.placed_count || 0} / {session.expected_package_count}</span><p className="mt-1 text-xs text-muted">{session.receiving_state === "paused" ? "Duraklatıldı" : "Devam ediyor"}</p></button>)}</div></section>}
+    {selected && <section className="space-y-4 rounded-[1.5rem] border border-line bg-white p-4 shadow-sm"><div><span className="text-xs font-black uppercase tracking-wider text-moss">{selected.receiving_state}</span><h2 className="text-2xl font-black">{selected.lot_number}</h2><p className="text-sm text-muted">{selected.progress.sku_count} SKU · {selected.progress.placed_packages}/{selected.progress.total_packages} paket · %{selected.progress.percent}</p><div className="mt-3 h-3 overflow-hidden rounded-full bg-line"><span className="block h-full bg-moss transition-all" style={{ width: `${selected.progress.percent}%` }}/></div></div>
+      {selected.receiving_state === "paused" && <button className="primary-button min-h-14 w-full" onClick={() => void changeState("active")}><Play/>Devam et</button>}
+      {selected.receiving_state === "active" && <>
+        {!pkg && <ScanInput key={scanCycle} busy={busy} onScan={claim} label="Tedarikçi No Tara / Gir" placeholder="A012-B34" cameraTitle="Tedarikçi numarasını okutun"/>}
+        {pkg && <div className="space-y-3"><PackageCard pkg={pkg}/>{pkg.image_path_snapshot && <img className="max-h-52 w-full rounded-2xl object-contain bg-canvas" src={`/api/products/${encodeURIComponent(pkg.product_id)}/image`} alt={pkg.product_name_snapshot}/>}<div className="grid grid-cols-2 gap-2 text-sm"><p className="rounded-xl bg-canvas p-3"><b>Tedarikçi</b><br/>{pkg.supplier_no_snapshot || pkg.supplier_code}</p><p className="rounded-xl bg-canvas p-3"><b>Lot</b><br/>{pkg.lot_number}</p><p className="rounded-xl bg-canvas p-3"><b>Paket</b><br/>{pkg.package_number}/{pkg.total_packages}</p><p className="rounded-xl bg-canvas p-3"><b>Ağırlık</b><br/>{pkg.package_weight_kg_snapshot || "—"} kg</p></div>
+          <p className="rounded-xl bg-canvas p-3 text-sm"><b>Ürün</b><br/>{[pkg.material_snapshot, pkg.size_snapshot].filter(Boolean).join(" · ") || "—"} · {pkg.unit_weight_g_snapshot || "—"} g/adet</p>
+          {["CLAIMED", "PRINT_FAILED"].includes(pkg.status) && <button className="primary-button min-h-16 w-full text-lg" disabled={busy} onClick={() => void print()}><Printer/> {pkg.status === "PRINT_FAILED" ? "Etiketi yeniden bas" : "Etiket Yazdır"}</button>}
+          {pkg.status === "LABEL_QUEUED" && <Notice message="Etiket basılıyor; yazıcı sonucu bekleniyor…"/>}
+          {pkg.status === "LABELED" && !suggestion && <button className="secondary-button min-h-14 w-full" onClick={async () => { try { setSuggestion(await warehouseAdminApi.suggestLocation(pkg.id)); } catch (reason) { setError(getErrorMessage(reason)); } }}><MapPin/>Lokasyon öner</button>}
+          {suggestion && <><p className="rounded-2xl bg-emerald-50 p-5 text-center text-lg font-black text-success">Paketi {suggestion.code} lokasyonuna yerleştirin</p><ScanInput busy={busy} onScan={scanLocation} label="Lokasyon barkodunu okutun" placeholder={suggestion.code} cameraTitle="Raf lokasyonunu okutun"/>{overrideLocation && <div className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 p-3"><p className="text-sm font-black text-amber-900">{overrideLocation} için yetkili override</p><input className="field" value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} placeholder="Zorunlu açıklama"/><button className="secondary-button w-full" disabled={!overrideReason.trim() || busy} onClick={() => void placeAt(overrideLocation, overrideReason)}>Bu lokasyona yerleştir</button></div>}</>}
+        </div>}
+        <button className="secondary-button min-h-12 w-full" onClick={() => void changeState("paused")}><Pause/>Mal kabulü duraklat</button>
+      </>}
+      <div className="space-y-2">{selected.lines.map((line) => <div key={line.id} className={`rounded-xl border p-3 ${Number(line.completed_packages) === Number(line.expected_package_count) ? "border-emerald-200 bg-emerald-50" : "border-line"}`}><b>{line.sku_snapshot}</b><span className="float-right font-black">{line.completed_packages || 0}/{line.expected_package_count}{Number(line.completed_packages) === Number(line.expected_package_count) ? " ✓" : ""}</span><p className="mt-1 text-xs text-muted">{line.product_name_snapshot} · {line.received_quantity || 0}/{line.total_units} adet</p></div>)}</div>
+      {!!selected.events?.length && <details className="rounded-xl bg-canvas p-3"><summary className="cursor-pointer font-black">Mal kabul hareketleri ({selected.events.length})</summary><div className="mt-3 max-h-72 space-y-2 overflow-y-auto">{selected.events.map((event) => <div key={String(event.id)} className="rounded-lg bg-white p-2 text-xs"><b>{String(event.event_type)}</b><span className="float-right text-muted">{new Date(String(event.created_at)).toLocaleString("tr-TR")}</span><p className="mt-1 text-muted">{String(event.actor_username || "Sistem")}{event.package_code ? ` · ${String(event.package_code)}` : ""}{event.device_id ? ` · cihaz ${String(event.device_id).slice(0, 8)}` : ""}</p></div>)}</div></details>}
+      {selected.receiving_state !== "completed" && <button className="primary-button min-h-14 w-full" disabled={busy} onClick={() => void complete()}><CheckCircle2/>Mal Kabulü Tamamla</button>}
+      {selected.progress.remaining_packages > 0 && hasWarehousePermission(user, "warehouse:move_stock") && <div className="space-y-2 border-t border-line pt-4"><input className="field" value={forceReason} onChange={(event) => setForceReason(event.target.value)} placeholder={`${selected.progress.remaining_packages} eksik paket için zorunlu açıklama`}/><button className="secondary-button w-full text-danger" disabled={!forceReason.trim() || busy} onClick={() => void complete(true)}>Yetkili olarak eksikle tamamla</button></div>}
+    </section>}
+    {!!completedSessions.length && <section className="rounded-2xl border border-line bg-white p-4"><h2 className="font-black">Tamamlananlar</h2><div className="mt-3 space-y-2">{completedSessions.map((session) => <button key={session.id} onClick={() => void openSession(session.id)} className="w-full rounded-xl bg-canvas p-3 text-left"><b>{session.lot_number}</b><span className="float-right text-xs font-black text-moss">{session.expected_package_count} paket</span><p className="mt-1 text-xs text-muted">{session.sku_count} SKU · {session.expected_unit_count} adet · {Number(session.total_weight_kg || 0).toFixed(2)} kg · {session.actor_names || "—"}</p></button>)}</div></section>}
   </div></PermissionPage>;
 }
 
