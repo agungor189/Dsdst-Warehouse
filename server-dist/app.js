@@ -364,7 +364,7 @@ export function createWarehouseApp(config) {
             page: String(safePositiveInteger(req.query.page, 1)),
             limit: String(safePositiveInteger(req.query.limit, 25, 100)),
         });
-        for (const key of ["query", "status", "location", "lot"]) {
+        for (const key of ["query", "status", "location", "lot", "date_from", "date_to"]) {
             const value = safeQueryText(req.query[key], 120);
             if (value)
                 query.set(key, value);

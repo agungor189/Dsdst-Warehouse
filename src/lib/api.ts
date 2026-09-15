@@ -160,9 +160,9 @@ const warehouseDeviceId = () => {
 
 export const warehouseAdminApi = {
   async getWarehouseMap() { return (await request<WarehouseMapSnapshot>("/admin/warehouse-map")).data; },
-  async listPackages(filters: { page?: number; limit?: number; query?: string; status?: string; location?: string; lot?: string } = {}) {
+  async listPackages(filters: { page?: number; limit?: number; query?: string; status?: string; location?: string; lot?: string; date_from?: string; date_to?: string } = {}) {
     const query = new URLSearchParams({ page: String(filters.page || 1), limit: String(filters.limit || 25) });
-    for (const key of ["query", "status", "location", "lot"] as const) if (filters[key]) query.set(key, filters[key]!);
+    for (const key of ["query", "status", "location", "lot", "date_from", "date_to"] as const) if (filters[key]) query.set(key, filters[key]!);
     const result = await request<WarehousePackageListItem[]>(`/admin/packages?${query}`);
     return { packages: result.data, pagination: result.pagination! };
   },

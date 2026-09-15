@@ -37,7 +37,7 @@ function CameraController({ mode, focus, fitKey, layout }: { mode: ViewMode; foc
   }, [camera, controls, fitKey, layout, mode]);
   useEffect(() => {
     if (!focus || !layout) return;
-      const rackCode = rackCodeFromLocation(focus);
+    const rackCode = rackCodeFromLocation(focus);
     const rack = layout.layout.objects.find((object) => object.type === "rack" && object.rackCode === rackCode);
     if (!rack) return;
     const x = rack.x + rack.width / 2 - layout.layout.warehouse.width / 2;
@@ -135,6 +135,11 @@ export default function WarehouseMapPage() {
     if (!snapshot) return [];
     return searchWarehousePackages(snapshot.packages, query).slice(0, 50);
   }, [query, snapshot]);
+  const locationResults = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase("tr-TR");
+    if (!snapshot || !needle) return [];
+    return snapshot.locations.filter((location) => location.code.toLocaleLowerCase("tr-TR").includes(needle)).slice(0, 20);
+  }, [query, snapshot]);
   const selectedIds = useMemo(() => new Set(results.map((pkg) => pkg.id).concat(selectedPackage?.id || [])), [results, selectedPackage]);
   const selectPackage = (pkg: WarehouseMapPackage) => { setSelectedPackage(pkg); setSelectedLocation(null); setSelectedRack(null); setFocus(pkg.location_code); };
   const selectLocation = (location: WarehouseMapLocation) => { setSelectedLocation(location); setSelectedPackage(null); setSelectedRack(null); setFocus(location.code); };
@@ -142,7 +147,7 @@ export default function WarehouseMapPage() {
   return <PermissionPage permission="warehouse:view_map"><div className="warehouse-map-page">
     <header className="map-toolbar"><div><p className="eyebrow">Depo Haritası</p><h1 className="text-2xl font-black">Canlı depo görünümü</h1></div><div className="flex flex-wrap gap-2">{(["perspective", "iso", "top"] as ViewMode[]).map((value) => <button className={`secondary-button ${mode === value ? "!bg-forest !text-white" : ""}`} key={value} onClick={() => setMode(value)}>{value === "perspective" ? "Perspektif" : value === "iso" ? "İzometrik" : "Üstten"}</button>)}<button className="secondary-button" onClick={() => { setFocus(null); setFitKey((value) => value + 1); }}>Depoya Sığdır</button><button className={`secondary-button ${heatmap ? "!bg-forest !text-white" : ""}`} onClick={() => setHeatmap((value) => !value)}>Doluluk</button><button className="secondary-button" onClick={() => void load()}><RefreshCw size={17}/> Yenile</button></div></header>
     <div className="map-search"><Search size={19}/><input aria-label="Depoda ara" placeholder="SKU, Supplier No, ürün, paket, lot veya lokasyon ara" value={query} onChange={(event) => setQuery(event.target.value)}/>{query && <button aria-label="Aramayı temizle" onClick={() => setQuery("")}><X size={18}/></button>}</div>
-    {query && <div className="map-results"><strong>{results.length} paket bulundu</strong>{results.slice(0, 8).map((pkg) => <button key={pkg.id} onClick={() => selectPackage(pkg)}><span><b>{pkg.sku}</b><small>{pkg.package_code}</small></span><span>{pkg.location_code}<ChevronRight size={16}/></span></button>)}</div>}
+    {query && <div className="map-results"><strong>{locationResults.length} lokasyon, {results.length} paket bulundu</strong>{locationResults.slice(0, 5).map((location) => <button key={location.id} onClick={() => selectLocation(location)}><span><b>{location.code}</b><small>{location.occupied} dolu · {location.reserved} rezerve</small></span><span>Lokasyon <ChevronRight size={16}/></span></button>)}{results.slice(0, 8).map((pkg) => <button key={pkg.id} onClick={() => selectPackage(pkg)}><span><b>{pkg.sku}</b><small>{pkg.package_code}</small></span><span>{pkg.location_code}<ChevronRight size={16}/></span></button>)}</div>}
     {error && <div className="map-error">Depo verileri yüklenemedi. {error}</div>}
     {!error && snapshot && !snapshot.warehouse && <div className="map-empty">Depo planı henüz tanımlanmamış.</div>}
     {snapshot?.warehouse && <div className="map-canvas"><WarehouseScene snapshot={snapshot} mode={mode} focus={focus} fitKey={fitKey} heatmap={heatmap} selectedIds={selectedIds} onPackage={selectPackage} onLocation={selectLocation} onRack={selectRack}/><div className="map-status">Son güncelleme {updatedAt?.toLocaleTimeString("tr-TR") || "—"}</div></div>}

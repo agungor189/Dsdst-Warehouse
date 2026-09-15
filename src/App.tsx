@@ -13,7 +13,7 @@ import {
   InboundPage, LabelingPage, LocationsPage, MoveStockPage, PlacementPage, PrintJobsPage,
   StockCountPage, WarehouseAdminPage, LabelTemplatesPage,
 } from "./pages/WarehouseAdminPages";
-import { CapacityPage, DashboardPage, LocationsDesktopPage, MovementsPage, PackagesPage, UserActivityPage } from "./pages/WmsDesktopPages";
+import { CapacityPage, DashboardPage, LocationsDesktopPage, MovementsPage, PackagesPage, PickingManagementPage, StockPage, UserActivityPage } from "./pages/WmsDesktopPages";
 
 const WarehouseMapPage = lazy(() => import("./pages/WarehouseMapPage"));
 
@@ -46,6 +46,8 @@ function AuthenticatedApp() {
         <Route path="/movements" element={<MovementsPage />} />
         <Route path="/user-activity" element={<UserActivityPage />} />
         <Route path="/capacity" element={<CapacityPage />} />
+        <Route path="/stock" element={<StockPage />} />
+        <Route path="/picking-management" element={<PickingManagementPage />} />
         <Route path="/picking" element={<Navigate to="/orders" replace />} />
         <Route path="/receiving" element={<Navigate to="/admin/inbound" replace />} />
         <Route path="/move" element={<Navigate to="/admin/move" replace />} />

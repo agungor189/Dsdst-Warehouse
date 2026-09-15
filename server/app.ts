@@ -408,7 +408,7 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
       page: String(safePositiveInteger(req.query.page, 1)),
       limit: String(safePositiveInteger(req.query.limit, 25, 100)),
     });
-    for (const key of ["query", "status", "location", "lot"] as const) {
+    for (const key of ["query", "status", "location", "lot", "date_from", "date_to"] as const) {
       const value = safeQueryText(req.query[key], 120);
       if (value) query.set(key, value);
     }
