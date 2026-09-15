@@ -1,4 +1,4 @@
-import { Activity, ArrowLeft, Boxes, ClipboardList, Layers3, LayoutDashboard, LogOut, Map, MapPin, Menu, Move, PackageCheck, Settings2, WifiOff, X } from "lucide-react";
+import { Activity, ArrowLeft, Boxes, ClipboardList, Layers3, LayoutDashboard, LogOut, Map, MapPin, Menu, Move, PackageCheck, Settings2, UserRound, WifiOff, X } from "lucide-react";
 import { useState, type PropsWithChildren } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useOnlineStatus } from "../hooks/useOnlineStatus";
@@ -10,6 +10,9 @@ export function AppShell({ children }: PropsWithChildren) {
   const online = useOnlineStatus();
   const { user, logout } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
+  const [logoutBusy, setLogoutBusy] = useState(false);
   const isHome = location.pathname === "/";
   const desktopLinks = [
     { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard, permission: "warehouse:view_map" as const },
@@ -32,6 +35,16 @@ export function AppShell({ children }: PropsWithChildren) {
   ];
   const visibleLinks = desktopLinks.filter((item) => !("permission" in item) || !item.permission || hasWarehousePermission(user, item.permission));
 
+  async function confirmLogout() {
+    setLogoutBusy(true);
+    try {
+      await logout();
+    } finally {
+      setLogoutBusy(false);
+      setLogoutConfirmOpen(false);
+    }
+  }
+
   return (
     <div className="min-h-dvh bg-canvas text-ink">
       {!online && <div className="sticky top-0 z-[60] flex items-center justify-center gap-2 bg-danger px-4 py-3 text-sm font-black text-white"><WifiOff size={18}/> Panel bağlantısı yok</div>}
@@ -52,7 +65,32 @@ export function AppShell({ children }: PropsWithChildren) {
             <button className="icon-button lg:hidden" aria-label="Menü" onClick={() => setMenuOpen(true)}><Menu size={22}/></button>
             <Link to="/" className="flex items-center gap-2.5"><span className="grid size-10 place-items-center rounded-xl bg-forest text-acid shadow-sm"><Boxes size={22} strokeWidth={2.4}/></span><span><span className="block text-[10px] font-black uppercase tracking-[0.22em] text-moss">DSDST</span><span className="block text-lg font-black leading-none tracking-tight">Warehouse</span></span></Link>
           </div>
-          <div className="flex items-center gap-2"><span className="hidden rounded-full border border-line bg-white px-3 py-1.5 text-xs font-bold text-muted sm:block">{user?.username}</span><button className="icon-button" aria-label="Çıkış yap" title={`${user?.username} · Çıkış yap`} onClick={() => void logout()}><LogOut size={20}/></button></div>
+          <div className="relative flex items-center gap-2">
+            <span className="hidden rounded-full border border-line bg-white px-3 py-1.5 text-xs font-bold text-muted sm:block">{user?.username}</span>
+            <button
+              className="icon-button"
+              aria-label="Hesap menüsü"
+              aria-expanded={accountMenuOpen}
+              aria-haspopup="menu"
+              title={`${user?.username} · Hesap menüsü`}
+              onClick={() => setAccountMenuOpen((open) => !open)}
+            ><UserRound size={20}/></button>
+            {accountMenuOpen && <>
+              <button className="fixed inset-0 z-40 cursor-default" aria-label="Hesap menüsünü kapat" onClick={() => setAccountMenuOpen(false)}/>
+              <div className="absolute right-0 top-14 z-50 w-64 overflow-hidden rounded-2xl border border-line bg-white p-2 shadow-[0_18px_50px_rgba(7,26,22,.18)]" role="menu">
+                <div className="border-b border-line px-3 py-3">
+                  <p className="text-[10px] font-black uppercase tracking-[.16em] text-moss">Oturum</p>
+                  <p className="mt-1 truncate text-sm font-black text-ink">{user?.username}</p>
+                </div>
+                <Link to="/admin" role="menuitem" className="mt-1 flex min-h-12 items-center gap-3 rounded-xl px-3 text-sm font-black hover:bg-canvas" onClick={() => setAccountMenuOpen(false)}><Settings2 size={19}/>Ayarlar</Link>
+                <button
+                  role="menuitem"
+                  className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-black text-danger hover:bg-red-50"
+                  onClick={() => { setAccountMenuOpen(false); setLogoutConfirmOpen(true); }}
+                ><LogOut size={19}/>Çıkış Yap</button>
+              </div>
+            </>}
+          </div>
         </header>
         <main className="mx-auto w-full max-w-[1600px] px-4 pb-28 lg:px-8 lg:pb-10">{children}</main>
         <nav className="mobile-bottom-nav">
@@ -62,6 +100,17 @@ export function AppShell({ children }: PropsWithChildren) {
           <NavLink to="/history"><Activity/><span>Geçmiş</span></NavLink>
         </nav>
       </div>
+      {logoutConfirmOpen && <div className="fixed inset-0 z-[70] grid place-items-center bg-forest/55 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !logoutBusy) setLogoutConfirmOpen(false); }}>
+        <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="logout-dialog-title" aria-describedby="logout-dialog-description">
+          <span className="grid size-12 place-items-center rounded-2xl bg-red-50 text-danger"><LogOut size={23}/></span>
+          <h2 id="logout-dialog-title" className="mt-5 text-2xl font-black">Çıkış yapmak istiyor musun?</h2>
+          <p id="logout-dialog-description" className="mt-2 text-sm leading-6 text-muted">Aktif oturumun kapatılacak ve giriş ekranına yönlendirileceksin.</p>
+          <div className="mt-6 grid grid-cols-2 gap-3">
+            <button className="secondary-button" disabled={logoutBusy} onClick={() => setLogoutConfirmOpen(false)}>Vazgeç</button>
+            <button className="primary-button !bg-danger" disabled={logoutBusy} onClick={() => void confirmLogout()}>{logoutBusy ? "Çıkılıyor…" : "Evet, çıkış yap"}</button>
+          </div>
+        </div>
+      </div>}
     </div>
   );
 }
