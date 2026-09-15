@@ -10,6 +10,7 @@ export interface AuthUser {
 
 export type WarehousePermission =
   | "warehouse:receive"
+  | "warehouse:manage_receiving_sessions"
   | "warehouse:print_labels"
   | "warehouse:place_packages"
   | "warehouse:move_stock"
@@ -65,6 +66,8 @@ export interface ReceivingSession extends Omit<InboundBatch, "lines"> {
   actor_names?: string | null;
   resumed?: boolean;
   lines: ReceivingLine[];
+  supplier_codes?: string[];
+  active_packages?: WarehousePackage[];
   events?: Array<Record<string, unknown>>;
   progress: {
     sku_count: number;
@@ -83,6 +86,7 @@ export interface ReceivingLot {
 
 export interface WarehousePackage {
   id: string;
+  batch_id: string;
   product_id: string;
   supplier_code: string;
   package_code: string;
@@ -108,6 +112,30 @@ export interface WarehousePackage {
   claim_token: string | null;
   claim_expires_at: string | null;
   claim_lease_seconds: number;
+  receiving_device_id?: string | null;
+  receiving_work_started_at?: string | null;
+  receiving_last_activity_at?: string | null;
+  receiving_location_reserved_at?: string | null;
+  placed_by_username?: string | null;
+}
+
+export interface ReceivingPlacedPackage {
+  package_id: string;
+  package_code: string;
+  product_id: string;
+  sku: string;
+  product_name: string;
+  supplier_no: string | null;
+  lot_number: string;
+  package_number: number;
+  total_packages: number;
+  quantity: number;
+  package_weight_kg: number;
+  image_path_snapshot: string | null;
+  image_url: string;
+  location_code: string;
+  placed_at: string;
+  placed_by_username: string;
 }
 
 export interface WarehouseLocation {
@@ -124,6 +152,7 @@ export interface WarehouseLocation {
   active: number;
   planned_location?: string;
   using_reserve?: boolean;
+  reserved_packages?: number;
 }
 
 export interface ImportPreview {

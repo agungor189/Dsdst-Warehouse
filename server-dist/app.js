@@ -322,11 +322,14 @@ export function createWarehouseApp(config) {
     }));
     app.get("/api/admin/receiving/lots/:lot", requireSession, (req, res) => forward(req, res, "GET", `/admin/receiving/lots/${encodeURIComponent(String(req.params.lot))}`));
     app.get("/api/admin/receiving/sessions", requireSession, (req, res) => forward(req, res, "GET", "/admin/receiving/sessions"));
+    app.get("/api/admin/receiving/my-active-package", requireSession, (req, res) => forward(req, res, "GET", "/admin/receiving/my-active-package"));
     app.post("/api/admin/receiving/sessions", requireSession, (req, res) => forward(req, res, "POST", "/admin/receiving/sessions", undefined, {
         lot_number: safeQueryText(req.body?.lot_number, 150),
         device_id: safeQueryText(req.body?.device_id, 150),
     }));
     app.get("/api/admin/receiving/sessions/:id", requireSession, (req, res) => forward(req, res, "GET", `/admin/receiving/sessions/${encodeURIComponent(String(req.params.id))}`));
+    app.get("/api/admin/receiving/sessions/:id/my-active-package", requireSession, (req, res) => forward(req, res, "GET", `/admin/receiving/sessions/${encodeURIComponent(String(req.params.id))}/my-active-package`));
+    app.get("/api/admin/receiving/sessions/:id/my-packages", requireSession, (req, res) => forward(req, res, "GET", `/admin/receiving/sessions/${encodeURIComponent(String(req.params.id))}/my-packages`));
     app.post("/api/admin/receiving/sessions/:id/state", requireSession, (req, res) => forward(req, res, "POST", `/admin/receiving/sessions/${encodeURIComponent(String(req.params.id))}/state`, undefined, {
         state: safeQueryText(req.body?.state, 20),
         device_id: safeQueryText(req.body?.device_id, 150),
@@ -347,6 +350,9 @@ export function createWarehouseApp(config) {
     });
     app.get("/api/admin/packages/by-code/:code", requireSession, (req, res) => forward(req, res, "GET", `/admin/packages/by-code/${encodeURIComponent(String(req.params.code))}`));
     app.post("/api/admin/packages/:id/print", requireSession, (req, res) => forward(req, res, "POST", `/admin/packages/${encodeURIComponent(String(req.params.id))}/print`, undefined, safeAdminBody(req.body)));
+    app.post("/api/admin/packages/:id/release-receiving", requireSession, (req, res) => forward(req, res, "POST", `/admin/packages/${encodeURIComponent(String(req.params.id))}/release-receiving`, undefined, {
+        device_id: safeQueryText(req.body?.device_id, 150),
+    }));
     app.get("/api/admin/print-jobs", requireSession, (req, res) => {
         const query = new URLSearchParams({ limit: String(safePositiveInteger(req.query.limit, 100, 500)) });
         return forward(req, res, "GET", "/admin/print-jobs", query);

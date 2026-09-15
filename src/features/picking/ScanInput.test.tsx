@@ -13,6 +13,7 @@ const ocr = vi.hoisted(() => ({
   recognize: vi.fn(),
   terminate: vi.fn().mockResolvedValue(undefined),
   setParameters: vi.fn().mockResolvedValue(undefined),
+  createWorker: vi.fn(),
 }));
 
 vi.mock("@zxing/browser", () => ({
@@ -30,7 +31,7 @@ vi.mock("@zxing/browser", () => ({
 }));
 vi.mock("tesseract.js", () => ({
   PSM: { SINGLE_LINE: "7" },
-  createWorker: vi.fn(async () => ({ recognize: ocr.recognize, terminate: ocr.terminate, setParameters: ocr.setParameters })),
+  createWorker: ocr.createWorker,
 }));
 
 describe("ScanInput kamera taraması", () => {
@@ -42,6 +43,7 @@ describe("ScanInput kamera taraması", () => {
     ocr.recognize.mockReset().mockImplementation(async () => ({ data: { text: ocr.text } }));
     ocr.terminate.mockClear();
     ocr.setParameters.mockClear();
+    ocr.createWorker.mockReset().mockResolvedValue({ recognize: ocr.recognize, terminate: ocr.terminate, setParameters: ocr.setParameters });
     vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
       drawImage: vi.fn(),
@@ -136,6 +138,26 @@ describe("ScanInput kamera taraması", () => {
     await screen.findByRole("dialog", { name: "Kamera ile tedarikçi no yazısını tara" });
     await user.click(screen.getByRole("button", { name: "OCR kamerasını kapat" }));
     await waitFor(() => tracks.forEach((track) => expect(track.stop).toHaveBeenCalledTimes(1)));
+  });
+
+  it("aynı OCR modalındaki tekrar taramalarda tek worker kullanır ve kapanışta sonlandırır", async () => {
+    ocr.text = "A01-B34";
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] }) } });
+    const user = userEvent.setup();
+    render(<ScanInput mode="both" ocrCandidates={["A012-B34", "A011-B34"]} onScan={vi.fn().mockResolvedValue(true)} busy={false}/>);
+    await user.click(screen.getByRole("button", { name: "Kamera ile Yazıyı Tara" }));
+    const video = await screen.findByLabelText("OCR kamera görüntüsü");
+    Object.defineProperty(video, "videoWidth", { configurable: true, value: 1920 });
+    Object.defineProperty(video, "videoHeight", { configurable: true, value: 1080 });
+    const readButton = await screen.findByRole("button", { name: "Yazıyı Oku" });
+    await waitFor(() => expect(readButton).toBeEnabled());
+    await user.click(readButton);
+    await waitFor(() => expect(ocr.recognize).toHaveBeenCalledTimes(1));
+    await user.click(readButton);
+    await waitFor(() => expect(ocr.recognize).toHaveBeenCalledTimes(2));
+    expect(ocr.createWorker).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "OCR kamerasını kapat" }));
+    await waitFor(() => expect(ocr.terminate).toHaveBeenCalledTimes(1));
   });
 
   it("mobil ekran akıştan ayrılırsa OCR kamera stream'ini temizler", async () => {

@@ -1,15 +1,16 @@
 import {
-  Boxes, CheckCircle2, ClipboardCheck, MapPin, Move, PackageCheck, Pause, Play, Printer, RefreshCw, Scale, Settings2,
+  Boxes, CheckCircle2, ClipboardCheck, MapPin, Move, PackageCheck, Pause, Play, Printer, RefreshCw, Scale, Settings2, X,
 } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ScanInput } from "../features/picking/ScanInput";
 import { hasWarehousePermission, useAuth } from "../features/auth/AuthContext";
 import { ApiError, getErrorMessage, warehouseAdminApi } from "../lib/api";
-import type { ReceivingSession, WarehouseLocation, WarehousePackage, WarehousePermission } from "../types/warehouse";
+import type { ReceivingPlacedPackage, ReceivingSession, WarehouseLocation, WarehousePackage, WarehousePermission } from "../types/warehouse";
 
 const permissionLabels: Record<WarehousePermission, string> = {
   "warehouse:receive": "Mal Kabul",
+  "warehouse:manage_receiving_sessions": "Mal Kabul Oturumu Yönetimi",
   "warehouse:print_labels": "Etiketleme",
   "warehouse:place_packages": "Yerleştirme",
   "warehouse:move_stock": "Ürün Taşıma",
@@ -47,43 +48,143 @@ const adminCards: Array<{ to: string; permission: WarehousePermission; title: st
 
 export function WarehouseAdminPage() {
   const { user } = useAuth();
+  const [activeReceivingCount, setActiveReceivingCount] = useState(0);
   const visible = adminCards.filter((card) => hasWarehousePermission(user, card.permission));
+  useEffect(() => {
+    if (!hasWarehousePermission(user, "warehouse:receive")) return;
+    void warehouseAdminApi.listReceivingSessions().then((items) =>
+      setActiveReceivingCount(items.filter((item) => ["active", "paused"].includes(item.receiving_state)).length)).catch(() => undefined);
+  }, [user?.id]);
   return <div className="space-y-5"><PageIntro eyebrow="Warehouse Admin" title="Depo operasyonları" description="Mal kabulden paket bazlı stok ve yerleştirmeye kadar kontrollü operasyon ekranları."/>
-    <div className="grid gap-3 sm:grid-cols-2">{visible.map((card) => <Link key={card.to} to={card.to} className="rounded-2xl border border-line bg-white p-5 shadow-sm transition active:scale-[.99]"><card.icon className="text-moss"/><h2 className="mt-4 font-black">{card.title}</h2><p className="mt-1 text-sm leading-5 text-muted">{card.description}</p></Link>)}</div>
+    <div className="grid gap-3 sm:grid-cols-2">{visible.map((card) => <Link key={card.to} to={card.to} className="rounded-2xl border border-line bg-white p-5 shadow-sm transition active:scale-[.99]"><card.icon className="text-moss"/><h2 className="mt-4 font-black">{card.title}</h2><p className="mt-1 text-sm leading-5 text-muted">{card.to === "/admin/inbound" ? `${activeReceivingCount} Aktif Mal Kabul` : card.description}</p></Link>)}</div>
     {!visible.length && <Notice error message="Bu kullanıcıya henüz Warehouse Admin yetkisi verilmemiş."/>}
   </div>;
 }
 
+const receivingBusinessErrors = new Set(["PLANNED_LOCATION_MISSING", "PLANNED_LOCATION_NOT_FOUND", "PLANNED_LOCATION_FULL"]);
+
+export function formatReceivingEvent(event: Record<string, unknown>) {
+  const actor = String(event.actor_username || "Sistem");
+  const sku = String(event.sku_snapshot || "paket");
+  const ordinal = event.package_number ? ` ${String(event.package_number)}/${String(event.total_packages)}` : "";
+  const location = String(event.location_code || "");
+  switch (String(event.event_type || "")) {
+    case "SESSION_STARTED": return `${actor}, ${String(event.lot_number || "mal kabul")} oturumunu başlattı.`;
+    case "SESSION_PAUSED": return `${actor}, mal kabulü duraklattı.`;
+    case "SESSION_ACTIVE": return `${actor}, mal kabulü devam ettirdi.`;
+    case "SESSION_COMPLETED": return `${actor}, mal kabulü tamamladı.`;
+    case "SESSION_FORCE_COMPLETED": return `${actor}, mal kabulü açıklamayla tamamladı.`;
+    case "SESSION_CANCELLED": return `${actor}, mal kabulü iptal etti.`;
+    case "PACKAGE_CLAIMED": return `${actor}, ${sku}${ordinal} paketini işleme aldı.`;
+    case "PACKAGE_CLAIM_RELEASED": return `${actor}, ${sku}${ordinal} paketinin claim'ini serbest bıraktı.`;
+    case "LABEL_QUEUED": return `${sku}${ordinal} etiketi yazdırma kuyruğuna gönderildi.`;
+    case "LABEL_REPRINT_QUEUED": return `${sku}${ordinal} etiketi yeniden yazdırma kuyruğuna gönderildi.`;
+    case "LABEL_PRINTED": return `${sku}${ordinal} etiketi basıldı.`;
+    case "LABEL_PRINT_FAILED": return `${sku}${ordinal} etiketi basılamadı.`;
+    case "PACKAGE_PLACED": return `${actor}, ${sku}${ordinal} paketini ${location || "planlanan"} rafına yerleştirdi.`;
+    default: return "Mal kabul işlemi güncellendi.";
+  }
+}
+
+const waitForRetry = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+
+export async function requestReceivingLocationWithRetry<T>(
+  request: () => Promise<T>,
+  wait: (milliseconds: number) => Promise<unknown> = waitForRetry,
+  onRetry?: () => void,
+) {
+  const delays = [0, 1_000, 2_000];
+  let lastError: unknown;
+  for (let attempt = 0; attempt < delays.length; attempt += 1) {
+    const delay = delays[attempt];
+    if (delay) await wait(delay);
+    try {
+      return await request();
+    } catch (reason) {
+      if (reason instanceof ApiError && receivingBusinessErrors.has(reason.code || "")) throw reason;
+      lastError = reason;
+      if (attempt < delays.length - 1) onRetry?.();
+    }
+  }
+  throw lastError;
+}
+
 export function InboundPage() {
   const { user } = useAuth();
+  const canManage = hasWarehousePermission(user, "warehouse:manage_receiving_sessions");
   const [sessions, setSessions] = useState<ReceivingSession[]>([]);
   const [selected, setSelected] = useState<ReceivingSession | null>(null);
   const [lotNumber, setLotNumber] = useState("");
   const [pkg, setPkg] = useState<WarehousePackage | null>(null);
   const [suggestion, setSuggestion] = useState<WarehouseLocation | null>(null);
+  const [myPackages, setMyPackages] = useState<ReceivingPlacedPackage[]>([]);
+  const [packageDetail, setPackageDetail] = useState<ReceivingPlacedPackage | null>(null);
   const [forceReason, setForceReason] = useState("");
   const [overrideLocation, setOverrideLocation] = useState("");
   const [overrideReason, setOverrideReason] = useState("");
-  const [locationBlocked, setLocationBlocked] = useState(false);
+  const [locationBusinessError, setLocationBusinessError] = useState(false);
+  const [locationRetrying, setLocationRetrying] = useState(false);
   const [scanCycle, setScanCycle] = useState(0);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  const loadReceivingLocation = async (activePackage: WarehousePackage) => {
+    setSuggestion(null); setLocationBusinessError(false); setLocationRetrying(false);
+    try {
+      const target = await requestReceivingLocationWithRetry(
+        () => warehouseAdminApi.getReceivingLocation(activePackage.id),
+        waitForRetry,
+        () => { setLocationRetrying(true); setMessage("Planlanan raf yüklenemedi. Tekrar deneniyor…"); },
+      );
+      setSuggestion(target); setError(""); setMessage(""); setLocationRetrying(false);
+    } catch (reason) {
+      setLocationRetrying(false); setMessage("");
+      if (reason instanceof ApiError && receivingBusinessErrors.has(reason.code || "")) {
+        setLocationBusinessError(true); setError(reason.message); return;
+      }
+      setError("Planlanan raf geçici olarak yüklenemedi. Bağlantıyı kontrol edip tekrar deneyin.");
+    }
+  };
+
+  const openSession = async (id: string, restoredPackage?: WarehousePackage | null) => {
+    setBusy(true); setError(""); setSuggestion(null); setOverrideLocation(""); setLocationBusinessError(false);
+    try {
+      const [session, activePackage, history] = await Promise.all([
+        warehouseAdminApi.getReceivingSession(id),
+        restoredPackage === undefined ? warehouseAdminApi.getMyActiveReceivingPackage(id) : Promise.resolve(restoredPackage),
+        warehouseAdminApi.listMyReceivingPackages(id),
+      ]);
+      setSelected(session); setPkg(activePackage); setMyPackages(history);
+      if (activePackage) setMessage("Devam eden paketiniz var. Kaldığınız aşamadan devam edebilirsiniz.");
+      if (activePackage?.status === "LABELED") await loadReceivingLocation(activePackage);
+    } catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); }
+  };
+
   const refreshSessions = async () => {
     try {
       const next = await warehouseAdminApi.listReceivingSessions();
       setSessions(next);
-      if (selected) {
-        const detail = await warehouseAdminApi.getReceivingSession(selected.id);
-        setSelected(detail);
-      }
+      if (selected) setSelected(await warehouseAdminApi.getReceivingSession(selected.id));
     } catch (reason) { setError(getErrorMessage(reason)); }
   };
+
   useEffect(() => {
-    void refreshSessions();
+    let active = true;
+    void Promise.all([warehouseAdminApi.listReceivingSessions(), warehouseAdminApi.getMyActiveReceivingPackage()])
+      .then(async ([nextSessions, activePackage]) => {
+        if (!active) return;
+        setSessions(nextSessions);
+        if (activePackage) await openSession(activePackage.batch_id, activePackage);
+      }).catch((reason) => { if (active) setError(getErrorMessage(reason)); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
     const timer = window.setInterval(() => void refreshSessions(), 3_000);
     return () => window.clearInterval(timer);
   }, [selected?.id]);
+
   useEffect(() => {
     if (!pkg || !["LABEL_QUEUED", "PRINT_FAILED"].includes(pkg.status)) return;
     const timer = window.setInterval(async () => {
@@ -92,34 +193,30 @@ export function InboundPage() {
         setPkg(current);
         if (current.status === "LABELED") {
           setMessage("Etiket başarıyla basıldı.");
-          try {
-            setSuggestion(await warehouseAdminApi.getReceivingLocation(current.id));
-            setLocationBlocked(false);
-          } catch (reason) {
-            setLocationBlocked(true); setError(getErrorMessage(reason));
-          }
+          await loadReceivingLocation(current);
         }
       } catch (reason) { setError(getErrorMessage(reason)); }
     }, 2_000);
     return () => window.clearInterval(timer);
   }, [pkg?.id, pkg?.status]);
+
   const start = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
     try {
       const session = await warehouseAdminApi.startReceivingSession(lotNumber);
-      setSelected(session); setPkg(null); setSuggestion(null); setOverrideLocation(""); setLocationBlocked(false); setLotNumber("");
-      setMessage(session.resumed ? "Bu parti için aktif mal kabul mevcut – devam ediliyor." : `${session.lot_number} mal kabulü başlatıldı.`);
-      await refreshSessions();
+      setLotNumber(""); setMessage(session.resumed ? "Bu lot için mevcut mal kabul açıldı." : `${session.lot_number} mal kabulü başlatıldı.`);
+      await refreshSessions(); await openSession(session.id);
     } catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); }
-  };
-  const openSession = async (id: string) => {
-    setBusy(true); setError(""); setPkg(null); setSuggestion(null); setOverrideLocation(""); setLocationBlocked(false);
-    try { setSelected(await warehouseAdminApi.getReceivingSession(id)); } catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); }
   };
   const claim = async (supplierCode: string) => {
     if (!selected) return false;
     setBusy(true); setError(""); setMessage("");
-    try { setPkg(await warehouseAdminApi.claimNext(supplierCode, selected.id)); setSuggestion(null); setOverrideLocation(""); setLocationBlocked(false); return true; }
+    try {
+      const claimed = await warehouseAdminApi.claimNext(supplierCode, selected.id);
+      setPkg(claimed); setSuggestion(null);
+      if (claimed.status === "LABELED") await loadReceivingLocation(claimed);
+      return true;
+    }
     catch (reason) { setError(getErrorMessage(reason)); return false; } finally { setBusy(false); }
   };
   const print = async () => {
@@ -131,19 +228,21 @@ export function InboundPage() {
     if (!pkg || (!suggestion && !reason)) return false; setBusy(true); setError("");
     try {
       const result = await warehouseAdminApi.placePackage(pkg.package_code, code, reason);
-      setMessage(`✓ ${result.package.sku_snapshot} ${result.package.package_number}/${result.package.total_packages} yerleştirildi`);
-      setPkg(null); setSuggestion(null); setOverrideLocation(""); setOverrideReason(""); setLocationBlocked(false); setScanCycle((value) => value + 1);
-      setSelected(await warehouseAdminApi.getReceivingSession(selected!.id));
+      setMessage(`✓ ${result.package.sku_snapshot} ${result.package.package_number}/${result.package.total_packages} ${result.package.location_code} lokasyonuna yerleştirildi`);
+      setPkg(null); setSuggestion(null); setOverrideLocation(""); setOverrideReason(""); setLocationBusinessError(false); setScanCycle((value) => value + 1);
+      if (selected) {
+        const [session, history] = await Promise.all([warehouseAdminApi.getReceivingSession(selected.id), warehouseAdminApi.listMyReceivingPackages(selected.id)]);
+        setSelected(session); setMyPackages(history);
+      }
       return true;
     } catch (failure) {
       if (failure instanceof ApiError && failure.code === "WRONG_LOCATION" && hasWarehousePermission(user, "warehouse:move_stock")) setOverrideLocation(code);
       setError(getErrorMessage(failure)); return false;
     } finally { setBusy(false); }
   };
-  const scanLocation = (code: string) => placeAt(code);
   const changeState = async (state: "active" | "paused" | "cancelled") => {
     if (!selected) return; setBusy(true); setError("");
-    try { setSelected(await warehouseAdminApi.setReceivingState(selected.id, state)); setMessage(state === "active" ? "Mal kabul devam ediyor." : state === "paused" ? "Mal kabul duraklatıldı." : "Mal kabul iptal edildi."); }
+    try { const session = await warehouseAdminApi.setReceivingState(selected.id, state); setSelected(session); setMessage(state === "active" ? "Mal kabul devam ediyor." : state === "paused" ? "Mal kabul duraklatıldı." : "Mal kabul iptal edildi."); await refreshSessions(); }
     catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); }
   };
   const complete = async (force = false) => {
@@ -151,32 +250,45 @@ export function InboundPage() {
     try { setSelected(await warehouseAdminApi.completeReceivingSession(selected.id, force ? forceReason : undefined)); setMessage("Mal kabul tamamlandı."); setForceReason(""); await refreshSessions(); }
     catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); }
   };
+  const releasePackage = async (packageId: string) => {
+    if (!selected) return; setBusy(true); setError("");
+    try { await warehouseAdminApi.releaseReceivingPackage(packageId); setMessage("Paket claim'i serbest bırakıldı."); await openSession(selected.id); }
+    catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); }
+  };
   const activeSessions = sessions.filter((session) => ["active", "paused"].includes(session.receiving_state));
   const completedSessions = sessions.filter((session) => session.receiving_state === "completed");
-  return <PermissionPage permission="warehouse:receive"><div className="space-y-5"><PageIntro eyebrow="Mal Kabul" title="Lot bazlı kabul" description="Lot Panel master verisinden açılır; tüm cihazlar aynı server-side ilerlemeyi görür."/>
+  const supplierCodes = selected?.supplier_codes?.length ? selected.supplier_codes : selected?.lines.map((line) => line.supplier_code).filter(Boolean) || [];
+
+  return <PermissionPage permission="warehouse:receive"><div className="space-y-5"><PageIntro eyebrow="Mal Kabul V2" title="Lot bazlı kabul" description={`${activeSessions.length} aktif mal kabul · kullanıcı işi ve raf rezervasyonu server-side korunur.`}/>
     {message && <Notice message={message}/>} {error && <Notice error message={error}/>}
-    <form onSubmit={start} className="space-y-3 rounded-2xl border border-line bg-white p-4"><h2 className="text-lg font-black">Yeni Mal Kabul Başlat</h2><input autoFocus className="field min-h-14 text-lg font-black uppercase" value={lotNumber} onChange={(event) => setLotNumber(event.target.value)} placeholder="LOT-2026-09-01" required/><button className="primary-button min-h-14 w-full text-lg" disabled={busy}>Lotu getir ve başlat</button></form>
-    {!!activeSessions.length && <section className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4"><h2 className="font-black text-amber-950">Aktif Mal Kabul</h2><div className="mt-3 space-y-2">{activeSessions.map((session) => <button key={session.id} onClick={() => void openSession(session.id)} className="w-full rounded-xl bg-white p-4 text-left shadow-sm"><b>{session.lot_number}</b><span className="float-right text-sm font-black text-amber-800">{session.placed_count || 0} / {session.expected_package_count}</span><p className="mt-1 text-xs text-muted">{session.receiving_state === "paused" ? "Duraklatıldı" : "Devam ediyor"}</p></button>)}</div></section>}
-    {selected && <section className="space-y-4 rounded-[1.5rem] border border-line bg-white p-4 shadow-sm"><div><span className="text-xs font-black uppercase tracking-wider text-moss">{selected.receiving_state}</span><h2 className="text-2xl font-black">{selected.lot_number}</h2><p className="text-sm text-muted">{selected.progress.sku_count} SKU · {selected.progress.placed_packages}/{selected.progress.total_packages} paket · %{selected.progress.percent}</p><div className="mt-3 h-3 overflow-hidden rounded-full bg-line"><span className="block h-full bg-moss transition-all" style={{ width: `${selected.progress.percent}%` }}/></div></div>
-      {selected.receiving_state === "paused" && <button className="primary-button min-h-14 w-full" onClick={() => void changeState("active")}><Play/>Devam et</button>}
+    {canManage && <form onSubmit={start} className="space-y-3 rounded-2xl border border-line bg-white p-4"><h2 className="text-lg font-black">Yeni Mal Kabul Başlat</h2><input className="field min-h-14 text-lg font-black uppercase" value={lotNumber} onChange={(event) => setLotNumber(event.target.value)} placeholder="DSDST-2609" required/><button className="primary-button min-h-14 w-full text-lg" disabled={busy}>Lotu getir ve başlat</button></form>}
+    <section className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4"><h2 className="font-black text-amber-950">Aktif Mal Kabuller</h2>{activeSessions.length ? <div className="mt-3 space-y-2">{activeSessions.map((session) => <button key={session.id} onClick={() => void openSession(session.id)} className="w-full rounded-xl bg-white p-4 text-left shadow-sm"><b>{session.lot_number}</b><span className="float-right text-sm font-black text-amber-800">{session.placed_count || 0} / {session.expected_package_count}</span><p className="mt-1 text-xs text-muted">{session.receiving_state === "paused" ? "Duraklatıldı" : "Devam ediyor"}</p></button>)}</div> : <p className="mt-2 text-sm text-amber-900">Açık mal kabul bulunmuyor.</p>}</section>
+    {selected && <section className="space-y-4 rounded-[1.5rem] border border-line bg-white p-4 shadow-sm"><div><span className="text-xs font-black uppercase tracking-wider text-moss">{selected.receiving_state}</span><h2 className="text-2xl font-black">{selected.lot_number}</h2><p className="text-sm text-muted">{selected.progress.placed_packages} / {selected.progress.total_packages} paket tamamlandı</p><div className="mt-3 h-3 overflow-hidden rounded-full bg-line"><span className="block h-full bg-moss transition-all" style={{ width: `${selected.progress.percent}%` }}/></div></div>
+      {canManage && <div className="grid grid-cols-2 gap-2">{selected.receiving_state === "paused" ? <button className="primary-button min-h-12" onClick={() => void changeState("active")}><Play/>Devam et</button> : selected.receiving_state === "active" ? <button className="secondary-button min-h-12" onClick={() => void changeState("paused")}><Pause/>Duraklat</button> : null}{["active", "paused"].includes(selected.receiving_state) && <button className="secondary-button min-h-12 text-danger" onClick={() => void changeState("cancelled")}>İptal et</button>}</div>}
       {selected.receiving_state === "active" && <>
-        {!pkg && <ScanInput key={scanCycle} busy={busy} onScan={claim} label="Tedarikçi No Tara / Gir" placeholder="A012-B34" cameraTitle="Tedarikçi numarasını okutun" mode="both" ocrCandidates={[...new Set(selected.lines.map((line) => line.supplier_code).filter(Boolean))]}/>}
-        {pkg && <div className="space-y-3"><PackageCard pkg={pkg}/>{pkg.image_path_snapshot && <img className="max-h-52 w-full rounded-2xl object-contain bg-canvas" src={`/api/products/${encodeURIComponent(pkg.product_id)}/image`} alt={pkg.product_name_snapshot}/>}<div className="grid grid-cols-2 gap-2 text-sm"><p className="rounded-xl bg-canvas p-3"><b>Tedarikçi</b><br/>{pkg.supplier_no_snapshot || pkg.supplier_code}</p><p className="rounded-xl bg-canvas p-3"><b>Lot</b><br/>{pkg.lot_number}</p><p className="rounded-xl bg-canvas p-3"><b>Paket</b><br/>{pkg.package_number}/{pkg.total_packages}</p><p className="rounded-xl bg-canvas p-3"><b>Ağırlık</b><br/>{pkg.package_weight_kg_snapshot || "—"} kg</p></div>
-          <p className="rounded-xl bg-canvas p-3 text-sm"><b>Ürün</b><br/>{[pkg.material_snapshot, pkg.size_snapshot].filter(Boolean).join(" · ") || "—"} · {pkg.unit_weight_g_snapshot || "—"} g/adet</p>
+        {!pkg && (
+          <ScanInput key={scanCycle} busy={busy} onScan={claim} label="Tedarikçi No Tara / Gir" placeholder="A012-B34" cameraTitle="Tedarikçi numarasını okutun" mode="both" ocrCandidates={[...new Set(supplierCodes)]}/>
+        )}
+        {pkg && <div className="space-y-3"><Notice message="Devam eden paketiniz var"/><PackageCard pkg={pkg}/>{pkg.image_path_snapshot && <img className="max-h-52 w-full rounded-2xl bg-canvas object-contain" src={`/api/products/${encodeURIComponent(pkg.product_id)}/image`} alt={pkg.product_name_snapshot}/>}<div className="grid grid-cols-2 gap-2 text-sm"><p className="rounded-xl bg-canvas p-3"><b>Tedarikçi</b><br/>{pkg.supplier_no_snapshot || pkg.supplier_code}</p><p className="rounded-xl bg-canvas p-3"><b>Lot</b><br/>{pkg.lot_number}</p><p className="rounded-xl bg-canvas p-3"><b>Paket</b><br/>{pkg.package_number}/{pkg.total_packages}</p><p className="rounded-xl bg-canvas p-3"><b>Ağırlık</b><br/>{pkg.package_weight_kg_snapshot || "—"} kg</p></div>
           {["CLAIMED", "PRINT_FAILED"].includes(pkg.status) && <button className="primary-button min-h-16 w-full text-lg" disabled={busy} onClick={() => void print()}><Printer/> {pkg.status === "PRINT_FAILED" ? "Etiketi yeniden bas" : "Etiket Yazdır"}</button>}
           {pkg.status === "LABEL_QUEUED" && <Notice message="Etiket basılıyor; yazıcı sonucu bekleniyor…"/>}
-          {pkg.status === "LABELED" && !suggestion && <Notice message="Planlanan lokasyon yükleniyor…"/>}
-          {suggestion && <><div className="rounded-2xl bg-emerald-50 p-5 text-center text-success"><p className="text-xs font-black uppercase tracking-[0.18em]">Yerleştirilecek Raf{suggestion.using_reserve ? " · Rezerv" : ""}</p><p className="mt-2 text-3xl font-black">{suggestion.code}</p><p className="mt-2 font-bold">ÜRÜNÜ {suggestion.code} RAFINA YERLEŞTİRİN</p></div><ScanInput busy={busy} onScan={scanLocation} label="Lokasyon barkodunu okutun" placeholder={suggestion.code} cameraTitle="Raf lokasyonunu okutun" mode="barcode"/>{overrideLocation && <div className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 p-3"><p className="text-sm font-black text-amber-900">{overrideLocation} için yetkili override</p><input className="field" value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} placeholder="Zorunlu açıklama"/><button className="secondary-button w-full" disabled={!overrideReason.trim() || busy} onClick={() => void placeAt(overrideLocation, overrideReason)}>Bu lokasyona yerleştir</button></div>}</>}
-          {locationBlocked && hasWarehousePermission(user, "warehouse:move_stock") && <div className="space-y-3 rounded-2xl border border-amber-300 bg-amber-50 p-4"><p className="font-black text-amber-950">Planlı raf kullanılamıyor · yetkili override</p><ScanInput busy={busy} mode="barcode" onScan={async (code) => { setOverrideLocation(code); return true; }} label="Alternatif lokasyon barkodunu okutun" placeholder="Lokasyon kodu" cameraTitle="Alternatif rafı okutun"/>{overrideLocation && <><input className="field" value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} placeholder="Zorunlu override açıklaması"/><button className="secondary-button w-full" disabled={!overrideReason.trim() || busy} onClick={() => void placeAt(overrideLocation, overrideReason)}>Override ile yerleştir</button></>}</div>}
+          {pkg.status === "LABELED" && !suggestion && (
+            <Notice message={locationRetrying ? "Planlanan raf yüklenemedi. Tekrar deneniyor…" : "Planlanan lokasyon yükleniyor…"}/>
+          )}
+          {pkg.status === "LABELED" && !suggestion && !locationRetrying && !locationBusinessError && <button className="secondary-button w-full" onClick={() => void loadReceivingLocation(pkg)}><RefreshCw/>Planlanan rafı tekrar yükle</button>}
+          {suggestion && <><div className="rounded-2xl bg-emerald-50 p-5 text-center text-success"><p className="text-xs font-black uppercase tracking-[0.18em]">Yerleştirilecek Raf{suggestion.using_reserve ? " · Rezerv" : ""}</p><p className="mt-2 text-3xl font-black">{suggestion.code}</p><p className="mt-2 font-bold">ÜRÜNÜ {suggestion.code} RAFINA YERLEŞTİRİN</p></div><ScanInput busy={busy} onScan={(code) => placeAt(code)} label="Lokasyon barkodunu okutun" placeholder={suggestion.code} cameraTitle="Raf lokasyonunu okutun" mode="barcode"/>{overrideLocation && <div className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 p-3"><p className="text-sm font-black text-amber-900">İstisnai yerleştirme: {overrideLocation}</p><input className="field" value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} placeholder="Zorunlu açıklama"/><button className="secondary-button w-full" disabled={!overrideReason.trim() || busy} onClick={() => void placeAt(overrideLocation, overrideReason)}>Bu lokasyona yerleştir</button></div>}</>}
+          {locationBusinessError && hasWarehousePermission(user, "warehouse:move_stock") && <div className="space-y-3 rounded-2xl border border-amber-300 bg-amber-50 p-4"><p className="font-black text-amber-950">Yalnız istisnai manuel yerleştirme</p><ScanInput busy={busy} mode="barcode" onScan={async (code) => { setOverrideLocation(code); return true; }} label="Alternatif lokasyon barkodunu okutun" placeholder="Lokasyon kodu" cameraTitle="Alternatif rafı okutun"/>{overrideLocation && <><input className="field" value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} placeholder="Zorunlu override açıklaması"/><button className="secondary-button w-full" disabled={!overrideReason.trim() || busy} onClick={() => void placeAt(overrideLocation, overrideReason)}>Override ile yerleştir</button></>}</div>}
         </div>}
-        <button className="secondary-button min-h-12 w-full" onClick={() => void changeState("paused")}><Pause/>Mal kabulü duraklat</button>
       </>}
-      <div className="space-y-2">{selected.lines.map((line) => <div key={line.id} className={`rounded-xl border p-3 ${Number(line.completed_packages) === Number(line.expected_package_count) ? "border-emerald-200 bg-emerald-50" : "border-line"}`}><b>{line.sku_snapshot}</b><span className="float-right font-black">{line.completed_packages || 0}/{line.expected_package_count}{Number(line.completed_packages) === Number(line.expected_package_count) ? " ✓" : ""}</span><p className="mt-1 text-xs text-muted">{line.product_name_snapshot} · {line.received_quantity || 0}/{line.total_units} adet</p></div>)}</div>
-      {!!selected.events?.length && <details className="rounded-xl bg-canvas p-3"><summary className="cursor-pointer font-black">Mal kabul hareketleri ({selected.events.length})</summary><div className="mt-3 max-h-72 space-y-2 overflow-y-auto">{selected.events.map((event) => <div key={String(event.id)} className="rounded-lg bg-white p-2 text-xs"><b>{String(event.event_type)}</b><span className="float-right text-muted">{new Date(String(event.created_at)).toLocaleString("tr-TR")}</span><p className="mt-1 text-muted">{String(event.actor_username || "Sistem")}{event.package_code ? ` · ${String(event.package_code)}` : ""}{event.device_id ? ` · cihaz ${String(event.device_id).slice(0, 8)}` : ""}</p></div>)}</div></details>}
-      {selected.receiving_state !== "completed" && <button className="primary-button min-h-14 w-full" disabled={busy} onClick={() => void complete()}><CheckCircle2/>Mal Kabulü Tamamla</button>}
-      {selected.progress.remaining_packages > 0 && hasWarehousePermission(user, "warehouse:move_stock") && <div className="space-y-2 border-t border-line pt-4"><input className="field" value={forceReason} onChange={(event) => setForceReason(event.target.value)} placeholder={`${selected.progress.remaining_packages} eksik paket için zorunlu açıklama`}/><button className="secondary-button w-full text-danger" disabled={!forceReason.trim() || busy} onClick={() => void complete(true)}>Yetkili olarak eksikle tamamla</button></div>}
+      <section><h3 className="font-black">Benim Yerleştirdiklerim</h3>{myPackages.length ? <div className="mt-3 space-y-2">{myPackages.map((item) => <button key={item.package_id} className="w-full rounded-xl bg-canvas p-3 text-left" onClick={() => setPackageDetail(item)}><b>{item.sku}</b><span className="float-right text-xs font-black text-moss">{item.location_code}</span><p className="mt-1 text-xs text-muted">Paket {item.package_number}/{item.total_packages} · {new Date(item.placed_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}</p></button>)}</div> : <p className="mt-2 text-sm text-muted">Bu lotta henüz yerleştirdiğiniz paket yok.</p>}</section>
+      {!!selected.events?.length && <details className="rounded-xl bg-canvas p-3"><summary className="cursor-pointer font-black">Son hareketler</summary><div className="mt-3 max-h-72 space-y-2 overflow-y-auto">{selected.events.slice(0, 30).map((event) => <div key={String(event.id)} className="rounded-lg bg-white p-3 text-xs"><span className="float-right text-muted">{new Date(String(event.created_at)).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}</span><p className="pr-12 font-bold">{formatReceivingEvent({ ...event, lot_number: selected.lot_number })}</p></div>)}</div></details>}
+      {canManage && !!selected.active_packages?.length && <details className="rounded-xl border border-line p-3"><summary className="cursor-pointer font-black">Aktif kullanıcı işleri ({selected.active_packages.length})</summary><div className="mt-3 space-y-2">{selected.active_packages.map((activePackage) => <div key={activePackage.id} className="rounded-xl bg-canvas p-3 text-sm"><b>{activePackage.sku_snapshot} {activePackage.package_number}/{activePackage.total_packages}</b><p className="text-xs text-muted">{activePackage.status} · {activePackage.package_code}</p><button className="secondary-button mt-2 w-full" disabled={busy} onClick={() => void releasePackage(activePackage.id)}>Claim'i serbest bırak</button></div>)}</div></details>}
+      {canManage && selected.receiving_state !== "completed" && <button className="primary-button min-h-14 w-full" disabled={busy} onClick={() => void complete()}><CheckCircle2/>Mal Kabulü Tamamla</button>}
+      {canManage && selected.progress.remaining_packages > 0 && <div className="space-y-2 border-t border-line pt-4"><input className="field" value={forceReason} onChange={(event) => setForceReason(event.target.value)} placeholder={`${selected.progress.remaining_packages} eksik paket için zorunlu açıklama`}/><button className="secondary-button w-full text-danger" disabled={!forceReason.trim() || busy} onClick={() => void complete(true)}>Yetkili olarak eksikle tamamla</button></div>}
+      {canManage && !!selected.lines.length && <details className="rounded-xl border border-line p-3"><summary className="cursor-pointer font-black">Lot Detayı ({selected.lines.length} SKU)</summary><div className="mt-3 space-y-2">{selected.lines.map((line) => <div key={line.id} className="rounded-xl bg-canvas p-3"><b>{line.sku_snapshot}</b><span className="float-right font-black">{line.completed_packages || 0}/{line.expected_package_count}</span><p className="mt-1 text-xs text-muted">{line.product_name_snapshot}</p></div>)}</div></details>}
     </section>}
-    {!!completedSessions.length && <section className="rounded-2xl border border-line bg-white p-4"><h2 className="font-black">Tamamlananlar</h2><div className="mt-3 space-y-2">{completedSessions.map((session) => <button key={session.id} onClick={() => void openSession(session.id)} className="w-full rounded-xl bg-canvas p-3 text-left"><b>{session.lot_number}</b><span className="float-right text-xs font-black text-moss">{session.expected_package_count} paket</span><p className="mt-1 text-xs text-muted">{session.sku_count} SKU · {session.expected_unit_count} adet · {Number(session.total_weight_kg || 0).toFixed(2)} kg · {session.actor_names || "—"}</p></button>)}</div></section>}
+    {canManage && !!completedSessions.length && <section className="rounded-2xl border border-line bg-white p-4"><h2 className="font-black">Tamamlananlar</h2><div className="mt-3 space-y-2">{completedSessions.map((session) => <button key={session.id} onClick={() => void openSession(session.id)} className="w-full rounded-xl bg-canvas p-3 text-left"><b>{session.lot_number}</b><span className="float-right text-xs font-black text-moss">{session.expected_package_count} paket</span></button>)}</div></section>}
+    {packageDetail && <div className="fixed inset-0 z-[80] flex items-end bg-black/50 sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label="Yerleştirilen paket detayı"><div className="max-h-[90vh] w-full overflow-y-auto rounded-t-3xl bg-white p-5 sm:max-w-lg sm:rounded-3xl"><div className="flex items-center justify-between"><h2 className="text-xl font-black">Paket Detayı</h2><button className="grid size-11 place-items-center rounded-xl bg-canvas" aria-label="Detayı kapat" onClick={() => setPackageDetail(null)}><X/></button></div><img className="mt-4 max-h-56 w-full rounded-2xl bg-canvas object-contain" src={packageDetail.image_url} alt={packageDetail.product_name}/><div className="mt-4 grid grid-cols-2 gap-2 text-sm"><p className="rounded-xl bg-canvas p-3"><b>SKU</b><br/>{packageDetail.sku}</p><p className="rounded-xl bg-canvas p-3"><b>Ürün</b><br/>{packageDetail.product_name}</p><p className="rounded-xl bg-canvas p-3"><b>Supplier No</b><br/>{packageDetail.supplier_no || "—"}</p><p className="rounded-xl bg-canvas p-3"><b>Lot</b><br/>{packageDetail.lot_number}</p><p className="rounded-xl bg-canvas p-3"><b>Paket</b><br/>{packageDetail.package_number}/{packageDetail.total_packages}</p><p className="rounded-xl bg-canvas p-3"><b>Adet</b><br/>{packageDetail.quantity}</p><p className="rounded-xl bg-canvas p-3"><b>Ağırlık</b><br/>{packageDetail.package_weight_kg || "—"} kg</p><p className="rounded-xl bg-canvas p-3"><b>Raf</b><br/>{packageDetail.location_code}</p><p className="rounded-xl bg-canvas p-3"><b>Zaman</b><br/>{new Date(packageDetail.placed_at).toLocaleString("tr-TR")}</p><p className="rounded-xl bg-canvas p-3"><b>Kullanıcı</b><br/>{packageDetail.placed_by_username}</p><p className="col-span-2 rounded-xl bg-canvas p-3"><b>Package Code</b><br/>{packageDetail.package_code}</p></div></div></div>}
   </div></PermissionPage>;
 }
 

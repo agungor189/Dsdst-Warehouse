@@ -225,6 +225,32 @@ describe("Warehouse BFF", () => {
     expect(response.body.data.code).toBe("A3-K2-P5");
   });
 
+  it.each([
+    ["/api/admin/receiving/my-active-package", "/api/warehouse/v1/admin/receiving/my-active-package"],
+    ["/api/admin/receiving/sessions/session-1/my-active-package", "/api/warehouse/v1/admin/receiving/sessions/session-1/my-active-package"],
+    ["/api/admin/receiving/sessions/session-1/my-packages", "/api/warehouse/v1/admin/receiving/sessions/session-1/my-packages"],
+  ])("kullanıcıya özel receiving sorgusunu güvenli upstream rotasına iletir: %s", async (clientPath, upstreamPath) => {
+    let receivedPath = "";
+    const panelUrl = await startPanel((req, res) => { receivedPath = req.path; res.json({ success: true, data: [] }); });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .get(clientPath).set("Cookie", sessionCookie);
+    expect(response.status).toBe(200);
+    expect(receivedPath).toBe(upstreamPath);
+  });
+
+  it("claim serbest bırakmada yalnız cihaz kimliğini upstream'e aktarır", async () => {
+    let received: { path?: string; body?: unknown } = {};
+    const panelUrl = await startPanel((req, res) => { received = { path: req.path, body: req.body }; res.json({ success: true, data: {} }); });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .post("/api/admin/packages/package-1/release-receiving").set("Cookie", sessionCookie)
+      .send({ device_id: " phone-1 ", user_id: "other-user", status: "EXPECTED" });
+    expect(response.status).toBe(200);
+    expect(received).toEqual({
+      path: "/api/warehouse/v1/admin/packages/package-1/release-receiving",
+      body: { device_id: "phone-1" },
+    });
+  });
+
   it("toplama geçmişi için yalnız whitelist filtrelerini ve sınırlandırılmış sayfalama değerlerini aktarır", async () => {
     let receivedQuery: unknown;
     const panelUrl = await startPanel((req, res) => {

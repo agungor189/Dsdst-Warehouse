@@ -13,6 +13,7 @@ import type {
   WarehousePackage,
   WarehouseLocation,
   ImportPreview,
+  ReceivingPlacedPackage,
 } from "../types/warehouse";
 import type { ReceivingLot, ReceivingSession } from "../types/warehouse";
 
@@ -173,6 +174,15 @@ export const warehouseAdminApi = {
   async listReceivingSessions() {
     return (await request<ReceivingSession[]>("/admin/receiving/sessions")).data;
   },
+  async getMyActiveReceivingPackage(sessionId?: string) {
+    const path = sessionId
+      ? `/admin/receiving/sessions/${encodeURIComponent(sessionId)}/my-active-package`
+      : "/admin/receiving/my-active-package";
+    return (await request<WarehousePackage | null>(path)).data;
+  },
+  async listMyReceivingPackages(sessionId: string) {
+    return (await request<ReceivingPlacedPackage[]>(`/admin/receiving/sessions/${encodeURIComponent(sessionId)}/my-packages`)).data;
+  },
   async startReceivingSession(lotNumber: string) {
     return post<ReceivingSession>("/admin/receiving/sessions", { lot_number: lotNumber, device_id: warehouseDeviceId() });
   },
@@ -197,6 +207,9 @@ export const warehouseAdminApi = {
       idempotency_key: crypto.randomUUID(),
       device_id: warehouseDeviceId(),
     });
+  },
+  async releaseReceivingPackage(packageId: string) {
+    return post<WarehousePackage>(`/admin/packages/${encodeURIComponent(packageId)}/release-receiving`, { device_id: warehouseDeviceId() });
   },
   async listPrintJobs() { return (await request<Array<Record<string, unknown>>>("/admin/print-jobs?limit=200")).data; },
   async listLocations() { return (await request<WarehouseLocation[]>("/admin/locations")).data; },
