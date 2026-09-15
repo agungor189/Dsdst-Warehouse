@@ -61,3 +61,7 @@ Service worker yalnızca uygulama kabuğunu önbelleğe alır. Warehouse API ist
 Ana sayfadaki **Toplama Geçmişi** bağlantısı tamamlanan toplama oturumlarını gösterir. Bugün, dün, son 7 gün ve özel tarih aralığı yanında kullanıcı, SKU, ürün adı, sipariş/toplama numarası ve durum filtreleri bulunur. Özet kartları ve kullanıcı bazlı günlük operasyon özeti her zaman bugünün yerel gün sınırlarıyla hesaplanır.
 
 Sipariş tamamlanırken isteğe bağlı operasyon notu Panel API'ye gönderilir. Kalıcı session/item/component snapshot'ı, ağırlık hesapları ve duplicate koruması Panel repository'sindeki tek transaction içinde uygulanır; Warehouse uygulaması bu kayıtları yalnız okur ve silme rotası sunmaz.
+
+## Kamera ile tarama
+
+Toplama adımındaki **Kamera ile Tara** düğmesi cihazın arka kamerasıyla QR ve yaygın 1D barkodları okur. Etikette kodlanan lokasyon, barkod veya SKU değeri mevcut sunucu doğrulamasına gönderilir. Kamera erişimi production'da HTTPS (veya yerel geliştirmede localhost) gerektirir; izin verilmezse manuel giriş kullanılmaya devam eder.
