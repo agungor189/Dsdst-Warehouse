@@ -9,7 +9,7 @@ Browser/PWA → aynı origin /api → Warehouse Express BFF → Panel Warehouse 
                  └─ HttpOnly JWT         └─ x-api-key + panel JWT yalnızca burada eklenir
 ```
 
-Browser hiçbir API anahtarı, panel adresi veya JavaScript tarafından okunabilir JWT bilmez. Login sonucu BFF tarafından `HttpOnly`, `SameSite=Strict` cookie'ye çevrilir. BFF yalnızca tanımlı auth, sipariş, pick-plan, doğrulama, ürün-adet tamamlama, toplama geçmişi ve ürün görseli rotalarını kabul eder; genel amaçlı proxy değildir. Panel yanıtları önbelleğe alınmaz, anahtar/token içeren alanlar veya metinler frontend'e dönmeden redakte edilir.
+Browser hiçbir API anahtarı, panel adresi veya JavaScript tarafından okunabilir JWT bilmez. Login sonucu BFF tarafından `HttpOnly`, `SameSite=Strict` cookie'ye çevrilir. BFF yalnızca tanımlı auth, toplama ve Warehouse Admin rotalarını kabul eder; genel amaçlı proxy değildir. Panel yanıtları önbelleğe alınmaz, anahtar/token içeren alanlar veya metinler frontend'e dönmeden redakte edilir.
 
 ## Yerel geliştirme
 
@@ -65,3 +65,9 @@ Sipariş tamamlanırken isteğe bağlı operasyon notu Panel API'ye gönderilir.
 ## Kamera ile tarama
 
 Toplama adımındaki **Kamera ile Tara** düğmesi cihazın arka kamerasıyla QR ve yaygın 1D barkodları okur. Etikette kodlanan lokasyon, barkod veya SKU değeri mevcut sunucu doğrulamasına gönderilir. Kamera erişimi production'da HTTPS (veya yerel geliştirmede localhost) gerektirir; izin verilmezse manuel giriş kullanılmaya devam eder.
+
+## Warehouse Admin
+
+Yetkili kullanıcılar ana sayfadaki **Warehouse Admin** kartından mal kabul, etiketleme, paket yerleştirme, taşıma, lokasyon, sayım, baskı geçmişi ve merkezi şablon ekranlarına ulaşır. CSV/master dosyası önce tarayıcıda okunup Panel API'de kuru çalıştırılır; kullanıcı onayından önce DB'ye satır veya paket yazılmaz. Etiketleme ve tüm iki adımlı paket/lokasyon ekranları manuel girişin yanında aynı kamera tarayıcısını kullanır.
+
+Erişim menüde gizlenmekle kalmaz: Panel API her işlem için ilgili `warehouse:*` kullanıcı yetkisini ayrıca kontrol eder. `admin` rolü tüm Warehouse Admin izinlerine sahiptir.

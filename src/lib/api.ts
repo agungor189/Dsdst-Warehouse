@@ -9,6 +9,10 @@ import type {
   PickSessionDetail,
   PickSessionSummary,
   PickSessionUser,
+  InboundBatch,
+  WarehousePackage,
+  WarehouseLocation,
+  ImportPreview,
 } from "../types/warehouse";
 
 interface ApiEnvelope<T> {
@@ -136,6 +140,50 @@ export const authApi = {
   async logout() {
     await request<null>("/auth/logout", { method: "POST" });
   },
+};
+
+const post = async <T>(path: string, body: Record<string, unknown>) =>
+  (await request<T>(path, { method: "POST", body: JSON.stringify(body) })).data;
+
+export const warehouseAdminApi = {
+  async listBatches() { return (await request<InboundBatch[]>("/admin/batches")).data; },
+  async getBatch(id: string) { return (await request<InboundBatch>(`/admin/batches/${encodeURIComponent(id)}`)).data; },
+  async createBatch(input: { supplier_code: string; supplier_name?: string; source_filename?: string }) {
+    return post<InboundBatch>("/admin/batches", input);
+  },
+  async previewImport(id: string, rows: Array<Record<string, unknown>>) {
+    return post<ImportPreview>(`/admin/batches/${encodeURIComponent(id)}/import/preview`, { rows });
+  },
+  async applyImport(id: string, rows: Array<Record<string, unknown>>, previewHash: string) {
+    return post<InboundBatch>(`/admin/batches/${encodeURIComponent(id)}/import/apply`, { rows, preview_hash: previewHash });
+  },
+  async claimNext(supplierCode: string) {
+    return post<WarehousePackage>("/admin/packages/claim-next", { supplier_code: supplierCode });
+  },
+  async getPackage(code: string) {
+    return (await request<WarehousePackage>(`/admin/packages/by-code/${encodeURIComponent(code)}`)).data;
+  },
+  async queuePrint(packageId: string, claimToken?: string | null) {
+    return post<{ package: WarehousePackage; job: Record<string, unknown>; idempotent: boolean }>(`/admin/packages/${encodeURIComponent(packageId)}/print`, {
+      claim_token: claimToken || undefined,
+      idempotency_key: crypto.randomUUID(),
+    });
+  },
+  async listPrintJobs() { return (await request<Array<Record<string, unknown>>>("/admin/print-jobs?limit=200")).data; },
+  async listLocations() { return (await request<WarehouseLocation[]>("/admin/locations")).data; },
+  async suggestLocation() { return (await request<WarehouseLocation>("/admin/locations/suggestion")).data; },
+  async createLocation(input: Record<string, unknown>) { return post<WarehouseLocation>("/admin/locations", input); },
+  async placePackage(packageCode: string, locationCode: string) {
+    return post<{ package: WarehousePackage }>("/admin/placements", { package_code: packageCode, location_code: locationCode, idempotency_key: crypto.randomUUID() });
+  },
+  async movePackage(packageCode: string, locationCode: string) {
+    return post<{ package: WarehousePackage }>("/admin/moves", { package_code: packageCode, location_code: locationCode, idempotency_key: crypto.randomUUID() });
+  },
+  async countPackage(packageCode: string, countedQuantity: number, note?: string) {
+    return post<{ package: WarehousePackage }>("/admin/stock-counts", { package_code: packageCode, counted_quantity: countedQuantity, note, idempotency_key: crypto.randomUUID() });
+  },
+  async listTemplates() { return (await request<Array<Record<string, unknown>>>("/admin/label-templates")).data; },
+  async saveTemplate(input: Record<string, unknown>) { return post<Record<string, unknown>>("/admin/label-templates", input); },
 };
 
 export const getErrorMessage = (error: unknown) =>

@@ -175,6 +175,25 @@ describe("Warehouse BFF", () => {
     expect(receivedBody).toEqual({ product_id: "p1", code: "SKU-1" });
   });
 
+  it("Warehouse Admin claim yolunu sabit upstream rotasına ve güvenli alana sınırlar", async () => {
+    let received: { path?: string; body?: unknown; authorization?: string; key?: string } = {};
+    const panelUrl = await startPanel((req, res) => {
+      received = { path: req.path, body: req.body, authorization: req.header("authorization"), key: req.header("x-api-key") };
+      res.json({ success: true, data: { id: "package-1", package_code: "PKG-2609-000001" } });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .post("/api/admin/packages/claim-next")
+      .set("Cookie", sessionCookie)
+      .send({ supplier_code: " SUP-1 ", role: "admin", x_api_key: "leak" });
+    expect(response.status).toBe(200);
+    expect(received).toEqual({
+      path: "/api/warehouse/v1/admin/packages/claim-next",
+      body: { supplier_code: "SUP-1" },
+      authorization: `Bearer ${SESSION}`,
+      key: SECRET,
+    });
+  });
+
   it("toplama geçmişi için yalnız whitelist filtrelerini ve sınırlandırılmış sayfalama değerlerini aktarır", async () => {
     let receivedQuery: unknown;
     const panelUrl = await startPanel((req, res) => {

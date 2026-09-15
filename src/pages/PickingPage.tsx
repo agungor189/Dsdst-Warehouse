@@ -39,6 +39,7 @@ export function PickingPage() {
   const allComplete = Boolean(plan?.items.length && completedCount === plan.items.length);
   const currentIndex = currentItem ? plan?.items.indexOf(currentItem) || 0 : plan?.items.length || 0;
   const isVerified = currentItem?.product_id === verifiedProductId || Boolean(currentItem?.verified_code_type);
+  const primaryAllocation = currentItem?.package_allocations?.[0];
 
   const scan = async (code: string) => {
     if (!currentItem) return false;
@@ -140,12 +141,13 @@ export function PickingPage() {
       <section className="rounded-[1.75rem] border border-line bg-white p-5 shadow-sm">
         {currentItem.image_url ? <img className="mb-5 aspect-square w-full rounded-2xl bg-canvas object-contain" src={currentItem.image_url} alt={currentItem.name || currentItem.sku}/> : <div className="mb-5 grid aspect-[2/1] place-items-center rounded-2xl bg-canvas text-muted"><span className="flex items-center gap-2 font-bold"><ImageOff/> Ürün görseli yok</span></div>}
         <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.16em] text-moss"><MapPin size={17}/> Lokasyon</div>
-        <div className="mt-3 break-words text-5xl font-black leading-none tracking-[-0.05em] text-forest">{currentItem.warehouse_location || "LOKASYON YOK"}</div>
+        <div className="mt-3 break-words text-5xl font-black leading-none tracking-[-0.05em] text-forest">{primaryAllocation?.location_code || currentItem.warehouse_location || "LOKASYON YOK"}</div>
+        {currentItem.package_tracking && <div className="mt-4 space-y-2 rounded-2xl bg-acid/35 p-4"><p className="text-xs font-black uppercase tracking-widest text-forest">Paket sırası</p>{currentItem.package_allocations?.map((allocation) => <div key={allocation.package_id} className="flex items-center justify-between gap-3"><span className="font-black">{allocation.package_code}</span><span className="shrink-0 text-sm font-bold">{allocation.pick_quantity} adet</span></div>)}</div>}
         <div className="mt-5 border-t border-line pt-4"><p className="text-xs font-black uppercase tracking-widest text-muted">SKU</p><p className="mt-1 text-2xl font-black">{currentItem.sku}</p><p className="mt-2 text-base font-semibold text-muted">{currentItem.name || "Ürün adı yok"}</p></div>
-        <div className="mt-5 grid grid-cols-2 gap-3"><div className="rounded-xl bg-canvas p-3"><p className="text-xs font-bold text-muted">Gerekli</p><p className="mt-1 text-2xl font-black">{currentItem.required_quantity} <span className="text-sm">adet</span></p></div><div className="rounded-xl bg-canvas p-3"><p className="text-xs font-bold text-muted">Mevcut stok</p><p className={`mt-1 text-2xl font-black ${currentItem.central_stock < currentItem.required_quantity ? "text-danger" : ""}`}>{currentItem.central_stock}</p></div></div>
+        <div className="mt-5 grid grid-cols-2 gap-3"><div className="rounded-xl bg-canvas p-3"><p className="text-xs font-bold text-muted">Gerekli</p><p className="mt-1 text-2xl font-black">{currentItem.required_quantity} <span className="text-sm">adet</span></p></div><div className="rounded-xl bg-canvas p-3"><p className="text-xs font-bold text-muted">Mevcut stok</p><p className={`mt-1 text-2xl font-black ${(currentItem.available_stock ?? currentItem.central_stock) < currentItem.required_quantity ? "text-danger" : ""}`}>{currentItem.available_stock ?? currentItem.central_stock}</p></div></div>
       </section>
 
-      {!isVerified && <ScanInput onScan={scan} busy={busy} />}
+      {!isVerified && <ScanInput onScan={scan} busy={busy} label={currentItem.package_tracking ? "Önerilen paket / lokasyon kodunu okutun" : undefined} placeholder={primaryAllocation?.package_code || undefined} cameraTitle={currentItem.package_tracking ? "Paket veya lokasyonu okutun" : undefined}/>}
       {isVerified && (
         <form onSubmit={confirmQuantity} className="rounded-2xl border-2 border-success/30 bg-emerald-50 p-4">
           <div className="mb-4 flex items-center gap-2 font-black text-success"><Check size={22}/> Ürün / lokasyon doğrulandı</div>

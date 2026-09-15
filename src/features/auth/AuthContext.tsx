@@ -1,6 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type PropsWithChildren } from "react";
 import { authApi } from "../../lib/api";
 import type { AuthUser } from "../../types/warehouse";
+import type { WarehousePermission } from "../../types/warehouse";
+
+export function hasWarehousePermission(user: AuthUser | null, permission: WarehousePermission) {
+  if (!user) return false;
+  if (user.role === "admin") return true;
+  if (user.permissions?.[permission] === true) return true;
+  const warehouse = user.permissions?.warehouse;
+  return Boolean(warehouse && typeof warehouse === "object" && (warehouse as Record<string, unknown>)[permission.replace("warehouse:", "")] === true);
+}
 
 interface AuthContextValue {
   user: AuthUser | null;

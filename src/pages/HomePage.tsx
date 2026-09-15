@@ -1,13 +1,15 @@
-import { ArrowRight, CircleCheck, CircleX, History, PackageCheck, Play } from "lucide-react";
+import { ArrowRight, CircleCheck, CircleX, History, PackageCheck, Play, Settings2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { useAuth } from "../features/auth/AuthContext";
+import { hasWarehousePermission, useAuth } from "../features/auth/AuthContext";
 import { getErrorMessage, warehouseApi } from "../lib/api";
 import type { WarehouseOrderSummary } from "../types/warehouse";
 
 export function HomePage() {
   const { user } = useAuth();
   const [state, setState] = useState<{ total?: number; activeOrder?: WarehouseOrderSummary; error?: string }>({});
+  const canUseAdmin = ["warehouse:receive", "warehouse:print_labels", "warehouse:place_packages", "warehouse:move_stock", "warehouse:manage_locations", "warehouse:count_stock"]
+    .some((permission) => hasWarehousePermission(user, permission as Parameters<typeof hasWarehousePermission>[1]));
 
   useEffect(() => {
     warehouseApi.listOrders(1, 100)
@@ -47,6 +49,8 @@ export function HomePage() {
         </span>
         <ArrowRight className="text-muted"/>
       </Link>
+
+      {canUseAdmin && <Link to="/admin" className="flex min-h-20 items-center justify-between rounded-2xl border border-line bg-white p-4 shadow-sm transition active:scale-[0.99]"><span className="flex items-center gap-3"><span className="grid size-11 place-items-center rounded-xl bg-acid text-forest"><Settings2 size={22}/></span><span><span className="block font-black">Warehouse Admin</span><span className="mt-0.5 block text-xs font-semibold text-muted">Mal kabul, paket, lokasyon ve baskı</span></span></span><ArrowRight className="text-muted"/></Link>}
 
       <div className="grid grid-cols-2 gap-3">
         <div className="metric-card">

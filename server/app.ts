@@ -93,7 +93,7 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
 
   app.disable("x-powered-by");
   app.use(helmet({ contentSecurityPolicy: false }));
-  app.use(express.json({ limit: "16kb", strict: true }));
+  app.use(express.json({ limit: "2mb", strict: true }));
   app.use("/api", (_req, res, next) => {
     res.setHeader("Cache-Control", "no-store");
     next();
@@ -337,6 +337,41 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     const note = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 2000) : "";
     return forward(req, res, "POST", `/orders/${encodeURIComponent(String(req.params.id))}/complete`, undefined, note ? { note } : {});
   });
+
+  const safeAdminBody = (body: unknown) => body && typeof body === "object" && !Array.isArray(body)
+    ? body as Record<string, unknown>
+    : {};
+  app.get("/api/admin/batches", requireSession, (req, res) => forward(req, res, "GET", "/admin/batches"));
+  app.post("/api/admin/batches", requireSession, (req, res) => forward(req, res, "POST", "/admin/batches", undefined, safeAdminBody(req.body)));
+  app.get("/api/admin/batches/:id", requireSession, (req, res) =>
+    forward(req, res, "GET", `/admin/batches/${encodeURIComponent(String(req.params.id))}`));
+  app.post("/api/admin/batches/:id/import/preview", requireSession, (req, res) =>
+    forward(req, res, "POST", `/admin/batches/${encodeURIComponent(String(req.params.id))}/import/preview`, undefined, {
+      rows: Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 5000) : [],
+    }));
+  app.post("/api/admin/batches/:id/import/apply", requireSession, (req, res) =>
+    forward(req, res, "POST", `/admin/batches/${encodeURIComponent(String(req.params.id))}/import/apply`, undefined, {
+      rows: Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 5000) : [],
+      preview_hash: safeQueryText(req.body?.preview_hash, 128),
+    }));
+  app.post("/api/admin/packages/claim-next", requireSession, (req, res) =>
+    forward(req, res, "POST", "/admin/packages/claim-next", undefined, { supplier_code: safeQueryText(req.body?.supplier_code, 100) }));
+  app.get("/api/admin/packages/by-code/:code", requireSession, (req, res) =>
+    forward(req, res, "GET", `/admin/packages/by-code/${encodeURIComponent(String(req.params.code))}`));
+  app.post("/api/admin/packages/:id/print", requireSession, (req, res) =>
+    forward(req, res, "POST", `/admin/packages/${encodeURIComponent(String(req.params.id))}/print`, undefined, safeAdminBody(req.body)));
+  app.get("/api/admin/print-jobs", requireSession, (req, res) => {
+    const query = new URLSearchParams({ limit: String(safePositiveInteger(req.query.limit, 100, 500)) });
+    return forward(req, res, "GET", "/admin/print-jobs", query);
+  });
+  app.get("/api/admin/locations", requireSession, (req, res) => forward(req, res, "GET", "/admin/locations"));
+  app.get("/api/admin/locations/suggestion", requireSession, (req, res) => forward(req, res, "GET", "/admin/locations/suggestion"));
+  app.post("/api/admin/locations", requireSession, (req, res) => forward(req, res, "POST", "/admin/locations", undefined, safeAdminBody(req.body)));
+  app.post("/api/admin/placements", requireSession, (req, res) => forward(req, res, "POST", "/admin/placements", undefined, safeAdminBody(req.body)));
+  app.post("/api/admin/moves", requireSession, (req, res) => forward(req, res, "POST", "/admin/moves", undefined, safeAdminBody(req.body)));
+  app.post("/api/admin/stock-counts", requireSession, (req, res) => forward(req, res, "POST", "/admin/stock-counts", undefined, safeAdminBody(req.body)));
+  app.get("/api/admin/label-templates", requireSession, (req, res) => forward(req, res, "GET", "/admin/label-templates"));
+  app.post("/api/admin/label-templates", requireSession, (req, res) => forward(req, res, "POST", "/admin/label-templates", undefined, safeAdminBody(req.body)));
 
   app.use("/api", (_req, res) => res.status(404).json({
     success: false,

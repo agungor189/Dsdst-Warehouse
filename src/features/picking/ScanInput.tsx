@@ -2,7 +2,19 @@ import type { IScannerControls } from "@zxing/browser";
 import { Camera, ScanBarcode, ScanLine, TriangleAlert, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-export function ScanInput({ onScan, busy }: { onScan: (code: string) => Promise<boolean>; busy: boolean }) {
+export function ScanInput({
+  onScan,
+  busy,
+  label = "Lokasyon / Barkod / SKU okutun",
+  placeholder = "Lokasyon, barkod veya SKU",
+  cameraTitle = "Lokasyon veya SKU okutun",
+}: {
+  onScan: (code: string) => Promise<boolean>;
+  busy: boolean;
+  label?: string;
+  placeholder?: string;
+  cameraTitle?: string;
+}) {
   const [code, setCode] = useState("");
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
@@ -92,8 +104,8 @@ export function ScanInput({ onScan, busy }: { onScan: (code: string) => Promise<
 
   return (
     <form onSubmit={submit} className="space-y-3">
-      <label htmlFor="scan-code" className="block text-sm font-black">Lokasyon / Barkod / SKU okutun</label>
-      <div className="relative"><ScanBarcode className="absolute left-4 top-1/2 -translate-y-1/2 text-moss" size={25}/><input ref={inputRef} id="scan-code" className="field min-h-16 pl-14 text-lg font-black uppercase" value={code} onChange={(event) => setCode(event.target.value)} autoComplete="off" autoCapitalize="characters" placeholder="Lokasyon, barkod veya SKU" disabled={busy}/></div>
+      <label htmlFor="scan-code" className="block text-sm font-black">{label}</label>
+      <div className="relative"><ScanBarcode className="absolute left-4 top-1/2 -translate-y-1/2 text-moss" size={25}/><input ref={inputRef} id="scan-code" className="field min-h-16 pl-14 text-lg font-black uppercase" value={code} onChange={(event) => setCode(event.target.value)} autoComplete="off" autoCapitalize="characters" placeholder={placeholder} disabled={busy}/></div>
       <div className="grid grid-cols-2 gap-3">
         <button className="secondary-button min-h-14" disabled={busy} type="button" onClick={() => setCameraOpen(true)}><Camera size={21}/> Kamera ile Tara</button>
         <button className="primary-button w-full" disabled={!code.trim() || busy} type="submit">{busy ? "Kontrol ediliyor..." : "Doğrula"}</button>
@@ -101,7 +113,7 @@ export function ScanInput({ onScan, busy }: { onScan: (code: string) => Promise<
       {cameraOpen && (
         <div className="fixed inset-0 z-[70] flex flex-col bg-forest text-white" role="dialog" aria-modal="true" aria-label="Kamera ile kod tara">
           <div className="flex items-center justify-between px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))]">
-            <div><p className="text-xs font-black uppercase tracking-[0.18em] text-acid">Kamera taraması</p><h2 className="mt-1 text-xl font-black">Lokasyon veya SKU okutun</h2></div>
+            <div><p className="text-xs font-black uppercase tracking-[0.18em] text-acid">Kamera taraması</p><h2 className="mt-1 text-xl font-black">{cameraTitle}</h2></div>
             <button className="grid size-11 place-items-center rounded-xl bg-white/10" type="button" aria-label="Kamerayı kapat" onClick={() => setCameraOpen(false)}><X size={23}/></button>
           </div>
           <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black">

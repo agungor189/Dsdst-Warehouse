@@ -4,7 +4,74 @@ export interface AuthUser {
   id: string;
   username: string;
   role: string;
+  permissions: Record<string, unknown>;
   must_change_password: boolean;
+}
+
+export type WarehousePermission =
+  | "warehouse:receive"
+  | "warehouse:print_labels"
+  | "warehouse:place_packages"
+  | "warehouse:move_stock"
+  | "warehouse:manage_locations"
+  | "warehouse:count_stock"
+  | "warehouse:edit_label_templates";
+
+export interface InboundBatch {
+  id: string;
+  batch_number: string;
+  supplier_code: string;
+  supplier_name: string | null;
+  status: "DRAFT" | "READY" | "RECEIVING" | "PLACING" | "COMPLETED" | "CANCELLED";
+  expected_package_count: number;
+  expected_unit_count: number;
+  package_count?: number;
+  placed_count?: number;
+  labeled_count?: number;
+  print_failed_count?: number;
+  created_at: string;
+  lines?: Array<Record<string, unknown>>;
+  package_status_counts?: Array<{ status: string; count: number }>;
+}
+
+export interface WarehousePackage {
+  id: string;
+  package_code: string;
+  status: string;
+  batch_number: string;
+  sku_snapshot: string;
+  product_name_snapshot: string;
+  lot_number: string | null;
+  package_number: number;
+  total_packages: number;
+  planned_quantity: number;
+  remaining_quantity: number;
+  location_code: string | null;
+  claim_token: string | null;
+  claim_expires_at: string | null;
+  claim_lease_seconds: number;
+}
+
+export interface WarehouseLocation {
+  id: string;
+  code: string;
+  zone: string | null;
+  aisle: string | null;
+  rack: string | null;
+  shelf: string | null;
+  bin: string | null;
+  package_capacity: number;
+  occupied_packages: number;
+  available_capacity: number;
+  active: number;
+}
+
+export interface ImportPreview {
+  valid: boolean;
+  rows: Array<Record<string, unknown>>;
+  errors: Array<{ source_row: number; code: string; message: string }>;
+  totals: { lines: number; packages: number; units: number };
+  preview_hash: string;
 }
 
 export interface WarehousePicker {
@@ -61,6 +128,17 @@ export interface PickItem {
   warehouse_location: string | null;
   required_quantity: number;
   central_stock: number;
+  available_stock?: number;
+  package_tracking?: boolean;
+  package_allocations?: Array<{
+    package_id: string;
+    package_code: string;
+    package_number: number;
+    total_packages: number;
+    location_code: string | null;
+    available_quantity: number;
+    pick_quantity: number;
+  }>;
   product_type: string;
   parent_assembly_sku: string | null;
   parent_assembly_skus: string[];
