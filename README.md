@@ -1,6 +1,8 @@
-# DSDST Warehouse
+# DSDST Warehouse WMS
 
 Panel uygulamasından bağımsız, mobil öncelikli sipariş toplama PWA'sı. Ürün, sipariş, BOM, stok ve toplama ilerlemesi için paneli tek veri kaynağı olarak kullanır; picking progress browser depolamasında tutulmaz.
+
+Telefon ve tablette uygulama bir **Warehouse Operations Terminal** olarak; desktop'ta responsive sidebar, KPI dashboard, paket/lokasyon/hareket tabloları, kullanıcı aktivitesi, kapasite analizi ve salt-okunur 3D depo haritasıyla bir **Warehouse Management & Visualization System** olarak çalışır. İki deneyim de aynı BFF ve Panel DB verisini kullanır.
 
 ## Mimari
 
@@ -71,3 +73,14 @@ Toplama adımındaki **Kamera ile Tara** düğmesi cihazın arka kamerasıyla QR
 Yetkili kullanıcılar ana sayfadaki **Warehouse Admin** kartından mal kabul, etiketleme, paket yerleştirme, taşıma, lokasyon, sayım, baskı geçmişi ve merkezi şablon ekranlarına ulaşır. Mal Kabul ekranına CSV yüklenmez: kullanıcı Panel ürün master importunda tanımlanmış lotu girer, ortak server-side oturuma katılır ve tedarikçi no → etiket → önerilen lokasyon → raf okutma akışını tamamlar. Aktif oturum ve ilerleme kontrollü polling ile telefon, tablet ve PC'de ortak görünür; refresh işlem durumunu kaybettirmez. Etiketleme ve tüm paket/lokasyon adımları manuel girişin yanında aynı kamera tarayıcısını kullanır.
 
 Erişim menüde gizlenmekle kalmaz: Panel API her işlem için ilgili `warehouse:*` kullanıcı yetkisini ayrıca kontrol eder. `admin` rolü tüm Warehouse Admin izinlerine sahiptir.
+
+## 3D depo haritası
+
+`/warehouse-map` route'u React lazy import ile ayrı chunk olarak üretilir. Three.js, React Three Fiber ve Drei kodu mobil başlangıç bundle'ına veya PWA precache manifestine alınmaz; kullanıcı haritayı açtığında yüklenir. Paketler tek `InstancedMesh` içinde çizilir. Kamera, seçim ve arama state'i 8 saniyelik snapshot yenilemelerinde korunur.
+
+Harita salt-okunurdur. Paket taşıma, stok düzeltme ve yerleştirme mevcut yetkili operasyon akışlarına yönlendirilir. Canlı kapasite ve rezervasyonlar layout JSON'dan değil Panel API'den gelir.
+
+Yeni kullanıcı izinleri:
+
+- `warehouse:view_map`
+- `warehouse:view_analytics`

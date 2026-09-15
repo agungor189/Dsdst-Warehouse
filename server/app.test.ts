@@ -264,6 +264,25 @@ describe("Warehouse BFF", () => {
     expect(receivedQuery).toEqual({ page: "2", limit: "100", sku: "KIT-001", status: "PICKED" });
   });
 
+  it("harita snapshot'ını tek sabit endpoint üzerinden taşır", async () => {
+    let receivedPath = "";
+    const panelUrl = await startPanel((req, res) => { receivedPath = req.path; res.json({ success: true, data: { warehouse: null, locations: [], packages: [] } }); });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .get("/api/admin/warehouse-map").set("Cookie", sessionCookie);
+    expect(response.status).toBe(200);
+    expect(receivedPath).toBe("/api/warehouse/v1/admin/warehouse-map");
+  });
+
+  it("paket listesinde yalnız sunucu filtreleri ve sınırlı sayfalama aktarır", async () => {
+    let receivedQuery: unknown;
+    const panelUrl = await startPanel((req, res) => { receivedQuery = req.query; res.json({ success: true, data: [], pagination: {} }); });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .get("/api/admin/packages?page=2&limit=999&query=PCI&lot=L1&location=A1&status=PLACED&unsafe=yes")
+      .set("Cookie", sessionCookie);
+    expect(response.status).toBe(200);
+    expect(receivedQuery).toEqual({ page: "2", limit: "100", query: "PCI", status: "PLACED", location: "A1", lot: "L1" });
+  });
+
   it("tamamlama notunu kırpar ve bilinmeyen body alanlarını panele göndermez", async () => {
     let receivedBody: unknown;
     const panelUrl = await startPanel((req, res) => {

@@ -402,6 +402,26 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     return forward(req, res, "GET", "/admin/print-jobs", query);
   });
   app.get("/api/admin/locations", requireSession, (req, res) => forward(req, res, "GET", "/admin/locations"));
+  app.get("/api/admin/warehouse-map", requireSession, (req, res) => forward(req, res, "GET", "/admin/warehouse-map"));
+  app.get("/api/admin/packages", requireSession, (req, res) => {
+    const query = new URLSearchParams({
+      page: String(safePositiveInteger(req.query.page, 1)),
+      limit: String(safePositiveInteger(req.query.limit, 25, 100)),
+    });
+    for (const key of ["query", "status", "location", "lot"] as const) {
+      const value = safeQueryText(req.query[key], 120);
+      if (value) query.set(key, value);
+    }
+    return forward(req, res, "GET", "/admin/packages", query);
+  });
+  app.get("/api/admin/movements", requireSession, (req, res) => {
+    const query = new URLSearchParams({ limit: String(safePositiveInteger(req.query.limit, 200, 500)) });
+    return forward(req, res, "GET", "/admin/movements", query);
+  });
+  app.get("/api/admin/user-activity", requireSession, (req, res) => {
+    const query = new URLSearchParams({ limit: String(safePositiveInteger(req.query.limit, 200, 500)) });
+    return forward(req, res, "GET", "/admin/user-activity", query);
+  });
   app.get("/api/admin/locations/suggestion", requireSession, (req, res) => {
     const query = new URLSearchParams();
     const packageId = safeQueryText(req.query.package_id, 100);

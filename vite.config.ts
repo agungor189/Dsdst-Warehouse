@@ -37,7 +37,9 @@ export default defineConfig({
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [],
-        globPatterns: ["**/*.{js,css,html,svg,woff2}"]
+        globPatterns: ["**/*.{js,css,html,svg,woff2}"],
+        // The Three.js route must remain truly on-demand for mobile operators.
+        globIgnores: ["**/WarehouseMapPage-*.js"]
       }
     })
   ],

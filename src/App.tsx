@@ -1,4 +1,5 @@
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { lazy, Suspense } from "react";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { HomePage } from "./pages/HomePage";
 import { OrderDetailPage } from "./pages/OrderDetailPage";
@@ -12,6 +13,9 @@ import {
   InboundPage, LabelingPage, LocationsPage, MoveStockPage, PlacementPage, PrintJobsPage,
   StockCountPage, WarehouseAdminPage, LabelTemplatesPage,
 } from "./pages/WarehouseAdminPages";
+import { CapacityPage, DashboardPage, LocationsDesktopPage, MovementsPage, PackagesPage, UserActivityPage } from "./pages/WmsDesktopPages";
+
+const WarehouseMapPage = lazy(() => import("./pages/WarehouseMapPage"));
 
 function AuthenticatedApp() {
   const { user, loading } = useAuth();
@@ -21,6 +25,7 @@ function AuthenticatedApp() {
     <AppShell>
       <Routes>
         <Route path="/" element={<HomePage />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/orders" element={<OrdersPage />} />
         <Route path="/orders/:id" element={<OrderDetailPage />} />
         <Route path="/orders/:id/pick" element={<PickingPage />} />
@@ -35,6 +40,15 @@ function AuthenticatedApp() {
         <Route path="/admin/count" element={<StockCountPage />} />
         <Route path="/admin/prints" element={<PrintJobsPage />} />
         <Route path="/admin/templates" element={<LabelTemplatesPage />} />
+        <Route path="/warehouse-map" element={<Suspense fallback={<div className="state-card mt-6 font-black">3D depo haritası yükleniyor…</div>}><WarehouseMapPage /></Suspense>} />
+        <Route path="/packages" element={<PackagesPage />} />
+        <Route path="/locations" element={<LocationsDesktopPage />} />
+        <Route path="/movements" element={<MovementsPage />} />
+        <Route path="/user-activity" element={<UserActivityPage />} />
+        <Route path="/capacity" element={<CapacityPage />} />
+        <Route path="/picking" element={<Navigate to="/orders" replace />} />
+        <Route path="/receiving" element={<Navigate to="/admin/inbound" replace />} />
+        <Route path="/move" element={<Navigate to="/admin/move" replace />} />
       </Routes>
     </AppShell>
   );

@@ -14,6 +14,8 @@ import type {
   WarehouseLocation,
   ImportPreview,
   ReceivingPlacedPackage,
+  WarehouseMapSnapshot,
+  WarehousePackageListItem,
 } from "../types/warehouse";
 import type { ReceivingLot, ReceivingSession } from "../types/warehouse";
 
@@ -157,6 +159,15 @@ const warehouseDeviceId = () => {
 };
 
 export const warehouseAdminApi = {
+  async getWarehouseMap() { return (await request<WarehouseMapSnapshot>("/admin/warehouse-map")).data; },
+  async listPackages(filters: { page?: number; limit?: number; query?: string; status?: string; location?: string; lot?: string } = {}) {
+    const query = new URLSearchParams({ page: String(filters.page || 1), limit: String(filters.limit || 25) });
+    for (const key of ["query", "status", "location", "lot"] as const) if (filters[key]) query.set(key, filters[key]!);
+    const result = await request<WarehousePackageListItem[]>(`/admin/packages?${query}`);
+    return { packages: result.data, pagination: result.pagination! };
+  },
+  async listMovements() { return (await request<Array<Record<string, unknown>>>("/admin/movements")).data; },
+  async listUserActivity() { return (await request<Array<Record<string, unknown>>>("/admin/user-activity")).data; },
   async listBatches() { return (await request<InboundBatch[]>("/admin/batches")).data; },
   async getBatch(id: string) { return (await request<InboundBatch>(`/admin/batches/${encodeURIComponent(id)}`)).data; },
   async createBatch(input: { supplier_code: string; supplier_name?: string; source_filename?: string }) {

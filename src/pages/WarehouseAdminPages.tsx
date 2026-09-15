@@ -17,6 +17,8 @@ const permissionLabels: Record<WarehousePermission, string> = {
   "warehouse:manage_locations": "Lokasyonlar",
   "warehouse:count_stock": "Stok Sayımı",
   "warehouse:edit_label_templates": "Etiket Şablonları",
+  "warehouse:view_map": "Depo Haritası",
+  "warehouse:view_analytics": "Depo Analizi",
 };
 
 function PageIntro({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {

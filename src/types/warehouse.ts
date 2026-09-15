@@ -16,7 +16,93 @@ export type WarehousePermission =
   | "warehouse:move_stock"
   | "warehouse:manage_locations"
   | "warehouse:count_stock"
-  | "warehouse:edit_label_templates";
+  | "warehouse:edit_label_templates"
+  | "warehouse:view_map"
+  | "warehouse:view_analytics";
+
+export interface WarehouseLayoutObject {
+  id: string;
+  type: "rack" | "column" | "door";
+  name: string;
+  x: number;
+  z: number;
+  rotation: number;
+  width: number;
+  depth: number;
+  height: number;
+  color?: string;
+  rackCode?: string;
+  shelfCount?: number;
+  positionsPerShelf?: number;
+}
+
+export interface WarehouseMapLocation {
+  id: string;
+  code: string;
+  rack_code: string;
+  capacity: number;
+  occupied: number;
+  reserved: number;
+  available: number;
+}
+
+export interface WarehouseMapPackage {
+  id: string;
+  package_code: string;
+  status: string;
+  package_number: number;
+  total_packages: number;
+  quantity: number;
+  placed_at: string | null;
+  placed_by: string | null;
+  location_code: string;
+  sku: string;
+  product_name: string;
+  supplier_no: string | null;
+  lot_number: string | null;
+  weight: number;
+  width_mm: number | null;
+  depth_mm: number | null;
+  height_mm: number | null;
+  image_url: string | null;
+}
+
+export interface WarehouseMapSnapshot {
+  warehouse: null | {
+    id: string;
+    name: string;
+    layout_version: number;
+    updated_at: string;
+    layout: {
+      warehouse: { name: string; width: number; length: number; height: number };
+      objects: WarehouseLayoutObject[];
+    };
+  };
+  stats: Record<string, number>;
+  locations: WarehouseMapLocation[];
+  packages: WarehouseMapPackage[];
+  data_quality: {
+    layout_only_locations: string[];
+    map_missing_locations: string[];
+    duplicate_rack_codes: string[];
+    invalid_location_codes: string[];
+  };
+}
+
+export interface WarehousePackageListItem {
+  id: string;
+  package_code: string;
+  status: string;
+  package_number: number;
+  total_packages: number;
+  quantity: number;
+  placed_at: string | null;
+  sku: string;
+  product_name: string;
+  lot_number: string | null;
+  weight: number;
+  location_code: string | null;
+}
 
 export interface InboundBatch {
   id: string;
