@@ -211,6 +211,20 @@ describe("Warehouse BFF", () => {
     });
   });
 
+  it("Mal Kabul planlı rafını paket kimliğiyle sabit upstream rotasından alır", async () => {
+    let receivedPath = "";
+    const panelUrl = await startPanel((req, res) => {
+      receivedPath = req.path;
+      res.json({ success: true, data: { id: "location-1", code: "A3-K2-P5" } });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .get("/api/admin/packages/package-1/receiving-location")
+      .set("Cookie", sessionCookie);
+    expect(response.status).toBe(200);
+    expect(receivedPath).toBe("/api/warehouse/v1/admin/packages/package-1/receiving-location");
+    expect(response.body.data.code).toBe("A3-K2-P5");
+  });
+
   it("toplama geçmişi için yalnız whitelist filtrelerini ve sınırlandırılmış sayfalama değerlerini aktarır", async () => {
     let receivedQuery: unknown;
     const panelUrl = await startPanel((req, res) => {

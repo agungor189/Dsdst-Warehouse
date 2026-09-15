@@ -201,6 +201,7 @@ export const warehouseAdminApi = {
   async listPrintJobs() { return (await request<Array<Record<string, unknown>>>("/admin/print-jobs?limit=200")).data; },
   async listLocations() { return (await request<WarehouseLocation[]>("/admin/locations")).data; },
   async suggestLocation(packageId?: string) { return (await request<WarehouseLocation>(`/admin/locations/suggestion${packageId ? `?package_id=${encodeURIComponent(packageId)}` : ""}`)).data; },
+  async getReceivingLocation(packageId: string) { return (await request<WarehouseLocation>(`/admin/packages/${encodeURIComponent(packageId)}/receiving-location`)).data; },
   async createLocation(input: Record<string, unknown>) { return post<WarehouseLocation>("/admin/locations", input); },
   async placePackage(packageCode: string, locationCode: string, overrideReason?: string) {
     return post<{ package: WarehousePackage }>("/admin/placements", { package_code: packageCode, location_code: locationCode, override_reason: overrideReason, device_id: warehouseDeviceId(), idempotency_key: crypto.randomUUID() });

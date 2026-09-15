@@ -50,6 +50,8 @@ export interface ReceivingLine {
   received_quantity: number;
   units_per_package: number;
   package_weight_kg_snapshot: number;
+  planned_location_snapshot: string | null;
+  reserve_locations_snapshot: string | null;
 }
 
 export interface ReceivingSession extends Omit<InboundBatch, "lines"> {
@@ -120,6 +122,8 @@ export interface WarehouseLocation {
   occupied_packages: number;
   available_capacity: number;
   active: number;
+  planned_location?: string;
+  using_reserve?: boolean;
 }
 
 export interface ImportPreview {

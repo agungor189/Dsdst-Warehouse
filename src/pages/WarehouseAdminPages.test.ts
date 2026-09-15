@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseDelimitedText } from "./WarehouseAdminPages";
+import { InboundPage } from "./WarehouseAdminPages";
 
-describe("Warehouse CSV okuyucu", () => {
-  it("noktalı virgül ve tırnaklı alanları veri yazmadan ayrıştırır", () => {
-    expect(parseDelimitedText('SKU;Urun_adi;Paket Sayısı\nSKU-1;"Dirsek, 90°";4\n')).toEqual([
-      { SKU: "SKU-1", Urun_adi: "Dirsek, 90°", "Paket Sayısı": "4" },
-    ]);
+describe("Mal Kabul kullanıcı akışı", () => {
+  it("manuel lokasyon öner butonu içermez ve planlı rafı otomatik yükler", () => {
+    const source = InboundPage.toString();
+    expect(source).not.toContain("Lokasyon öner");
+    expect(source).toContain("Planlanan lokasyon yükleniyor");
+    expect(source).toContain("Yerleştirilecek Raf");
   });
 });

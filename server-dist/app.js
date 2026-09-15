@@ -359,6 +359,7 @@ export function createWarehouseApp(config) {
             query.set("package_id", packageId);
         return forward(req, res, "GET", "/admin/locations/suggestion", query);
     });
+    app.get("/api/admin/packages/:id/receiving-location", requireSession, (req, res) => forward(req, res, "GET", `/admin/packages/${encodeURIComponent(String(req.params.id))}/receiving-location`));
     app.post("/api/admin/locations", requireSession, (req, res) => forward(req, res, "POST", "/admin/locations", undefined, safeAdminBody(req.body)));
     app.post("/api/admin/placements", requireSession, (req, res) => forward(req, res, "POST", "/admin/placements", undefined, safeAdminBody(req.body)));
     app.post("/api/admin/moves", requireSession, (req, res) => forward(req, res, "POST", "/admin/moves", undefined, safeAdminBody(req.body)));

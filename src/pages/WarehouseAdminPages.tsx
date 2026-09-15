@@ -54,29 +54,6 @@ export function WarehouseAdminPage() {
   </div>;
 }
 
-export function parseDelimitedText(source: string): Array<Record<string, string>> {
-  const firstLine = source.split(/\r?\n/, 1)[0] || "";
-  const delimiter = (firstLine.match(/;/g)?.length || 0) > (firstLine.match(/,/g)?.length || 0) ? ";" : ",";
-  const records: string[][] = [];
-  let row: string[] = [], value = "", quoted = false;
-  for (let index = 0; index < source.length; index += 1) {
-    const char = source[index];
-    if (char === '"' && quoted && source[index + 1] === '"') { value += '"'; index += 1; }
-    else if (char === '"') quoted = !quoted;
-    else if (char === delimiter && !quoted) { row.push(value.trim()); value = ""; }
-    else if ((char === "\n" || char === "\r") && !quoted) {
-      if (char === "\r" && source[index + 1] === "\n") index += 1;
-      row.push(value.trim()); value = "";
-      if (row.some(Boolean)) records.push(row);
-      row = [];
-    } else value += char;
-  }
-  row.push(value.trim());
-  if (row.some(Boolean)) records.push(row);
-  const headers = records.shift()?.map((header) => header.trim()) || [];
-  return records.map((record) => Object.fromEntries(headers.map((header, index) => [header, record[index] || ""])));
-}
-
 export function InboundPage() {
   const { user } = useAuth();
   const [sessions, setSessions] = useState<ReceivingSession[]>([]);
@@ -87,6 +64,7 @@ export function InboundPage() {
   const [forceReason, setForceReason] = useState("");
   const [overrideLocation, setOverrideLocation] = useState("");
   const [overrideReason, setOverrideReason] = useState("");
+  const [locationBlocked, setLocationBlocked] = useState(false);
   const [scanCycle, setScanCycle] = useState(0);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -112,7 +90,15 @@ export function InboundPage() {
       try {
         const current = await warehouseAdminApi.getPackage(pkg.package_code);
         setPkg(current);
-        if (current.status === "LABELED") setSuggestion(await warehouseAdminApi.suggestLocation(current.id));
+        if (current.status === "LABELED") {
+          setMessage("Etiket başarıyla basıldı.");
+          try {
+            setSuggestion(await warehouseAdminApi.getReceivingLocation(current.id));
+            setLocationBlocked(false);
+          } catch (reason) {
+            setLocationBlocked(true); setError(getErrorMessage(reason));
+          }
+        }
       } catch (reason) { setError(getErrorMessage(reason)); }
     }, 2_000);
     return () => window.clearInterval(timer);
@@ -121,19 +107,19 @@ export function InboundPage() {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
     try {
       const session = await warehouseAdminApi.startReceivingSession(lotNumber);
-      setSelected(session); setPkg(null); setSuggestion(null); setOverrideLocation(""); setLotNumber("");
+      setSelected(session); setPkg(null); setSuggestion(null); setOverrideLocation(""); setLocationBlocked(false); setLotNumber("");
       setMessage(session.resumed ? "Bu parti için aktif mal kabul mevcut – devam ediliyor." : `${session.lot_number} mal kabulü başlatıldı.`);
       await refreshSessions();
     } catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); }
   };
   const openSession = async (id: string) => {
-    setBusy(true); setError(""); setPkg(null); setSuggestion(null); setOverrideLocation("");
+    setBusy(true); setError(""); setPkg(null); setSuggestion(null); setOverrideLocation(""); setLocationBlocked(false);
     try { setSelected(await warehouseAdminApi.getReceivingSession(id)); } catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); }
   };
   const claim = async (supplierCode: string) => {
     if (!selected) return false;
     setBusy(true); setError(""); setMessage("");
-    try { setPkg(await warehouseAdminApi.claimNext(supplierCode, selected.id)); setSuggestion(null); setOverrideLocation(""); return true; }
+    try { setPkg(await warehouseAdminApi.claimNext(supplierCode, selected.id)); setSuggestion(null); setOverrideLocation(""); setLocationBlocked(false); return true; }
     catch (reason) { setError(getErrorMessage(reason)); return false; } finally { setBusy(false); }
   };
   const print = async () => {
@@ -142,11 +128,11 @@ export function InboundPage() {
     catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); }
   };
   const placeAt = async (code: string, reason?: string) => {
-    if (!pkg || !suggestion) return false; setBusy(true); setError("");
+    if (!pkg || (!suggestion && !reason)) return false; setBusy(true); setError("");
     try {
       const result = await warehouseAdminApi.placePackage(pkg.package_code, code, reason);
       setMessage(`✓ ${result.package.sku_snapshot} ${result.package.package_number}/${result.package.total_packages} yerleştirildi`);
-      setPkg(null); setSuggestion(null); setOverrideLocation(""); setOverrideReason(""); setScanCycle((value) => value + 1);
+      setPkg(null); setSuggestion(null); setOverrideLocation(""); setOverrideReason(""); setLocationBlocked(false); setScanCycle((value) => value + 1);
       setSelected(await warehouseAdminApi.getReceivingSession(selected!.id));
       return true;
     } catch (failure) {
@@ -174,13 +160,14 @@ export function InboundPage() {
     {selected && <section className="space-y-4 rounded-[1.5rem] border border-line bg-white p-4 shadow-sm"><div><span className="text-xs font-black uppercase tracking-wider text-moss">{selected.receiving_state}</span><h2 className="text-2xl font-black">{selected.lot_number}</h2><p className="text-sm text-muted">{selected.progress.sku_count} SKU · {selected.progress.placed_packages}/{selected.progress.total_packages} paket · %{selected.progress.percent}</p><div className="mt-3 h-3 overflow-hidden rounded-full bg-line"><span className="block h-full bg-moss transition-all" style={{ width: `${selected.progress.percent}%` }}/></div></div>
       {selected.receiving_state === "paused" && <button className="primary-button min-h-14 w-full" onClick={() => void changeState("active")}><Play/>Devam et</button>}
       {selected.receiving_state === "active" && <>
-        {!pkg && <ScanInput key={scanCycle} busy={busy} onScan={claim} label="Tedarikçi No Tara / Gir" placeholder="A012-B34" cameraTitle="Tedarikçi numarasını okutun"/>}
+        {!pkg && <ScanInput key={scanCycle} busy={busy} onScan={claim} label="Tedarikçi No Tara / Gir" placeholder="A012-B34" cameraTitle="Tedarikçi numarasını okutun" mode="both" ocrCandidates={[...new Set(selected.lines.map((line) => line.supplier_code).filter(Boolean))]}/>}
         {pkg && <div className="space-y-3"><PackageCard pkg={pkg}/>{pkg.image_path_snapshot && <img className="max-h-52 w-full rounded-2xl object-contain bg-canvas" src={`/api/products/${encodeURIComponent(pkg.product_id)}/image`} alt={pkg.product_name_snapshot}/>}<div className="grid grid-cols-2 gap-2 text-sm"><p className="rounded-xl bg-canvas p-3"><b>Tedarikçi</b><br/>{pkg.supplier_no_snapshot || pkg.supplier_code}</p><p className="rounded-xl bg-canvas p-3"><b>Lot</b><br/>{pkg.lot_number}</p><p className="rounded-xl bg-canvas p-3"><b>Paket</b><br/>{pkg.package_number}/{pkg.total_packages}</p><p className="rounded-xl bg-canvas p-3"><b>Ağırlık</b><br/>{pkg.package_weight_kg_snapshot || "—"} kg</p></div>
           <p className="rounded-xl bg-canvas p-3 text-sm"><b>Ürün</b><br/>{[pkg.material_snapshot, pkg.size_snapshot].filter(Boolean).join(" · ") || "—"} · {pkg.unit_weight_g_snapshot || "—"} g/adet</p>
           {["CLAIMED", "PRINT_FAILED"].includes(pkg.status) && <button className="primary-button min-h-16 w-full text-lg" disabled={busy} onClick={() => void print()}><Printer/> {pkg.status === "PRINT_FAILED" ? "Etiketi yeniden bas" : "Etiket Yazdır"}</button>}
           {pkg.status === "LABEL_QUEUED" && <Notice message="Etiket basılıyor; yazıcı sonucu bekleniyor…"/>}
-          {pkg.status === "LABELED" && !suggestion && <button className="secondary-button min-h-14 w-full" onClick={async () => { try { setSuggestion(await warehouseAdminApi.suggestLocation(pkg.id)); } catch (reason) { setError(getErrorMessage(reason)); } }}><MapPin/>Lokasyon öner</button>}
-          {suggestion && <><p className="rounded-2xl bg-emerald-50 p-5 text-center text-lg font-black text-success">Paketi {suggestion.code} lokasyonuna yerleştirin</p><ScanInput busy={busy} onScan={scanLocation} label="Lokasyon barkodunu okutun" placeholder={suggestion.code} cameraTitle="Raf lokasyonunu okutun"/>{overrideLocation && <div className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 p-3"><p className="text-sm font-black text-amber-900">{overrideLocation} için yetkili override</p><input className="field" value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} placeholder="Zorunlu açıklama"/><button className="secondary-button w-full" disabled={!overrideReason.trim() || busy} onClick={() => void placeAt(overrideLocation, overrideReason)}>Bu lokasyona yerleştir</button></div>}</>}
+          {pkg.status === "LABELED" && !suggestion && <Notice message="Planlanan lokasyon yükleniyor…"/>}
+          {suggestion && <><div className="rounded-2xl bg-emerald-50 p-5 text-center text-success"><p className="text-xs font-black uppercase tracking-[0.18em]">Yerleştirilecek Raf{suggestion.using_reserve ? " · Rezerv" : ""}</p><p className="mt-2 text-3xl font-black">{suggestion.code}</p><p className="mt-2 font-bold">ÜRÜNÜ {suggestion.code} RAFINA YERLEŞTİRİN</p></div><ScanInput busy={busy} onScan={scanLocation} label="Lokasyon barkodunu okutun" placeholder={suggestion.code} cameraTitle="Raf lokasyonunu okutun" mode="barcode"/>{overrideLocation && <div className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 p-3"><p className="text-sm font-black text-amber-900">{overrideLocation} için yetkili override</p><input className="field" value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} placeholder="Zorunlu açıklama"/><button className="secondary-button w-full" disabled={!overrideReason.trim() || busy} onClick={() => void placeAt(overrideLocation, overrideReason)}>Bu lokasyona yerleştir</button></div>}</>}
+          {locationBlocked && hasWarehousePermission(user, "warehouse:move_stock") && <div className="space-y-3 rounded-2xl border border-amber-300 bg-amber-50 p-4"><p className="font-black text-amber-950">Planlı raf kullanılamıyor · yetkili override</p><ScanInput busy={busy} mode="barcode" onScan={async (code) => { setOverrideLocation(code); return true; }} label="Alternatif lokasyon barkodunu okutun" placeholder="Lokasyon kodu" cameraTitle="Alternatif rafı okutun"/>{overrideLocation && <><input className="field" value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} placeholder="Zorunlu override açıklaması"/><button className="secondary-button w-full" disabled={!overrideReason.trim() || busy} onClick={() => void placeAt(overrideLocation, overrideReason)}>Override ile yerleştir</button></>}</div>}
         </div>}
         <button className="secondary-button min-h-12 w-full" onClick={() => void changeState("paused")}><Pause/>Mal kabulü duraklat</button>
       </>}
