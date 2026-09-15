@@ -3,7 +3,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { PermissionPage } from "./WarehouseAdminPages";
 import { getErrorMessage, warehouseAdminApi, warehouseApi } from "../lib/api";
-import type { Pagination, PickHistorySummary, PickSessionSummary, WarehouseMapSnapshot, WarehouseOrderSummary, WarehousePackageListItem } from "../types/warehouse";
+import type { Pagination, PickHistorySummary, PickSessionSummary, WarehouseMapSnapshot, WarehouseOrderSummary, WarehousePackageListItem, WarehousePlacementLayout } from "../types/warehouse";
 
 const formatDate = (value: unknown) => value ? new Intl.DateTimeFormat("tr-TR", { dateStyle: "short", timeStyle: "short" }).format(new Date(String(value))) : "—";
 
@@ -13,8 +13,9 @@ function PageHeader({ eyebrow, title, description }: { eyebrow: string; title: s
 
 export function DashboardPage() {
   const [snapshot, setSnapshot] = useState<WarehouseMapSnapshot | null>(null);
+  const [placement, setPlacement] = useState<WarehousePlacementLayout | null>(null);
   const [error, setError] = useState("");
-  useEffect(() => { void warehouseAdminApi.getWarehouseMap().then(setSnapshot).catch((reason) => setError(getErrorMessage(reason))); }, []);
+  useEffect(() => { void Promise.all([warehouseAdminApi.getWarehouseMap(), warehouseAdminApi.getPlacementLayout()]).then(([map, layout]) => { setSnapshot(map); setPlacement(layout); }).catch((reason) => setError(getErrorMessage(reason))); }, []);
   const stats = snapshot?.stats || {};
   const cards = [
     ["Depodaki paket", stats.total_packages, Boxes], ["Toplam ürün adedi", stats.total_products, Box],
@@ -27,6 +28,7 @@ export function DashboardPage() {
   return <PermissionPage permission="warehouse:view_map"><div className="space-y-6">
     <PageHeader eyebrow="WMS Genel Bakış" title="Depoda şu anda ne oluyor?" description="Panel veritabanındaki canlı paket, lokasyon ve operasyon durumunun sade özeti."/>
     {error && <p className="rounded-2xl bg-red-50 p-4 font-bold text-danger" role="alert">{error}</p>}
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><article className="metric-card"><small>Aktif Layout</small><strong className="mt-2 text-2xl">{placement?.active ? `v${placement.active.layout_version}` : "—"}</strong></article><article className="metric-card"><small>Yerleşmiş SKU</small><strong className="mt-2 text-2xl">{placement ? `${placement.summary.placed_skus} / ${placement.summary.assigned_skus}` : "—"}</strong></article><article className="metric-card"><small>Devam Eden Mal Kabul</small><strong className="mt-2 text-2xl">{placement?.summary.active_receiving ?? "—"}</strong></article><article className="metric-card"><small>Aktif Parti</small><strong className="mt-2 truncate text-lg">{placement?.summary.active_lots[0] || "—"}</strong></article></div>
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{cards.map(([label, value, Icon]) => <article className="metric-card" key={label}><Icon size={20} className="text-moss"/><span className="mt-3 text-xs font-bold text-muted">{label}</span><strong className="mt-1 text-3xl font-black">{value ?? "—"}</strong></article>)}</div>
     <Link to="/warehouse-map" className="flex items-center justify-between rounded-3xl bg-forest p-6 text-white"><span><span className="text-xs font-black uppercase tracking-[.2em] text-acid">Canlı görünüm</span><strong className="mt-2 block text-2xl">3D Depo Haritasını Aç</strong></span><Warehouse size={34}/></Link>
   </div></PermissionPage>;

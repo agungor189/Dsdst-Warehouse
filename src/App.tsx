@@ -14,6 +14,7 @@ import {
   StockCountPage, WarehouseAdminPage, LabelTemplatesPage,
 } from "./pages/WarehouseAdminPages";
 import { CapacityPage, DashboardPage, LocationsDesktopPage, MovementsPage, PackagesPage, PickingManagementPage, StockPage, UserActivityPage } from "./pages/WmsDesktopPages";
+import WarehouseLayoutPage from "./pages/WarehouseLayoutPage";
 
 const WarehouseMapPage = lazy(() => import("./pages/WarehouseMapPage"));
 
@@ -41,6 +42,7 @@ function AuthenticatedApp() {
         <Route path="/admin/prints" element={<PrintJobsPage />} />
         <Route path="/admin/templates" element={<LabelTemplatesPage />} />
         <Route path="/warehouse-map" element={<Suspense fallback={<div className="state-card mt-6 font-black">3D depo haritası yükleniyor…</div>}><WarehouseMapPage /></Suspense>} />
+        <Route path="/warehouse-layout" element={<WarehouseLayoutPage />} />
         <Route path="/packages" element={<PackagesPage />} />
         <Route path="/locations" element={<LocationsDesktopPage />} />
         <Route path="/movements" element={<MovementsPage />} />

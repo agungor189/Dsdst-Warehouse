@@ -117,6 +117,7 @@ export function InboundPage() {
   const [sessions, setSessions] = useState<ReceivingSession[]>([]);
   const [selected, setSelected] = useState<ReceivingSession | null>(null);
   const [lotNumber, setLotNumber] = useState("");
+  const [supplierCode, setSupplierCode] = useState("");
   const [pkg, setPkg] = useState<WarehousePackage | null>(null);
   const [suggestion, setSuggestion] = useState<WarehouseLocation | null>(null);
   const [myPackages, setMyPackages] = useState<ReceivingPlacedPackage[]>([]);
@@ -205,8 +206,8 @@ export function InboundPage() {
   const start = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
     try {
-      const session = await warehouseAdminApi.startReceivingSession(lotNumber);
-      setLotNumber(""); setMessage(session.resumed ? "Bu lot için mevcut mal kabul açıldı." : `${session.lot_number} mal kabulü başlatıldı.`);
+      const session = await warehouseAdminApi.startReceivingSession(lotNumber, supplierCode);
+      setLotNumber(""); setSupplierCode(""); setMessage(session.resumed ? "Bu lot için mevcut mal kabul açıldı." : `${session.lot_number} partisi oluşturuldu ve mal kabul başlatıldı.`);
       await refreshSessions(); await openSession(session.id);
     } catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); }
   };
@@ -263,7 +264,7 @@ export function InboundPage() {
 
   return <PermissionPage permission="warehouse:receive"><div className="space-y-5"><PageIntro eyebrow="Mal Kabul V2" title="Lot bazlı kabul" description={`${activeSessions.length} aktif mal kabul · kullanıcı işi ve raf rezervasyonu server-side korunur.`}/>
     {message && <Notice message={message}/>} {error && <Notice error message={error}/>}
-    {canManage && <form onSubmit={start} className="space-y-3 rounded-2xl border border-line bg-white p-4"><h2 className="text-lg font-black">Yeni Mal Kabul Başlat</h2><input className="field min-h-14 text-lg font-black uppercase" value={lotNumber} onChange={(event) => setLotNumber(event.target.value)} placeholder="DSDST-2609" required/><button className="primary-button min-h-14 w-full text-lg" disabled={busy}>Lotu getir ve başlat</button></form>}
+    {canManage && <form onSubmit={start} className="space-y-3 rounded-2xl border border-line bg-white p-4"><h2 className="text-lg font-black">Yeni Parti / Lot</h2><input className="field min-h-14 text-lg font-black uppercase" value={lotNumber} onChange={(event) => setLotNumber(event.target.value)} placeholder="2026-09-16-01" required/><input className="field min-h-14 font-black uppercase" value={supplierCode} onChange={(event) => setSupplierCode(event.target.value)} placeholder="Tedarikçi kodu (opsiyonel)"/><button className="primary-button min-h-14 w-full text-lg" disabled={busy}>Partiyi Oluştur / Aç</button></form>}
     <section className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4"><h2 className="font-black text-amber-950">Aktif Mal Kabuller</h2>{activeSessions.length ? <div className="mt-3 space-y-2">{activeSessions.map((session) => <button key={session.id} onClick={() => void openSession(session.id)} className="w-full rounded-xl bg-white p-4 text-left shadow-sm"><b>{session.lot_number}</b><span className="float-right text-sm font-black text-amber-800">{session.placed_count || 0} / {session.expected_package_count}</span><p className="mt-1 text-xs text-muted">{session.receiving_state === "paused" ? "Duraklatıldı" : "Devam ediyor"}</p></button>)}</div> : <p className="mt-2 text-sm text-amber-900">Açık mal kabul bulunmuyor.</p>}</section>
     {selected && <section className="space-y-4 rounded-[1.5rem] border border-line bg-white p-4 shadow-sm"><div><span className="text-xs font-black uppercase tracking-wider text-moss">{selected.receiving_state}</span><h2 className="text-2xl font-black">{selected.lot_number}</h2><p className="text-sm text-muted">{selected.progress.placed_packages} / {selected.progress.total_packages} paket tamamlandı</p><div className="mt-3 h-3 overflow-hidden rounded-full bg-line"><span className="block h-full bg-moss transition-all" style={{ width: `${selected.progress.percent}%` }}/></div></div>
       {canManage && <div className="grid grid-cols-2 gap-2">{selected.receiving_state === "paused" ? <button className="primary-button min-h-12" onClick={() => void changeState("active")}><Play/>Devam et</button> : selected.receiving_state === "active" ? <button className="secondary-button min-h-12" onClick={() => void changeState("paused")}><Pause/>Duraklat</button> : null}{["active", "paused"].includes(selected.receiving_state) && <button className="secondary-button min-h-12 text-danger" onClick={() => void changeState("cancelled")}>İptal et</button>}</div>}

@@ -1,4 +1,4 @@
-import { Activity, ArrowLeft, Boxes, ClipboardList, LayoutDashboard, LogOut, Map, MapPin, Menu, Move, PackageCheck, Settings2, WifiOff, X } from "lucide-react";
+import { Activity, ArrowLeft, Boxes, ClipboardList, Layers3, LayoutDashboard, LogOut, Map, MapPin, Menu, Move, PackageCheck, Settings2, WifiOff, X } from "lucide-react";
 import { useState, type PropsWithChildren } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useOnlineStatus } from "../hooks/useOnlineStatus";
@@ -18,10 +18,11 @@ export function AppShell({ children }: PropsWithChildren) {
     { label: "Mal Kabul", to: "/admin/inbound", icon: PackageCheck, permission: "warehouse:receive" as const },
     { label: "Ürün Taşıma", to: "/admin/move", icon: Move, permission: "warehouse:move_stock" as const },
     { section: "DEPO" },
+    { label: "Depo Yerleşimi", to: "/warehouse-layout", icon: Layers3, permission: "warehouse:view_map" as const },
     { label: "Depo Haritası", to: "/warehouse-map", icon: Map, permission: "warehouse:view_map" as const },
     { label: "Paketler", to: "/packages", icon: Boxes, permission: "warehouse:view_analytics" as const },
     { label: "Lokasyonlar", to: "/locations", icon: MapPin, permission: "warehouse:view_map" as const },
-    { label: "Stok", to: "/stock", icon: Boxes, permission: "warehouse:view_analytics" as const },
+    { label: "Ürünler", to: "/stock", icon: Boxes, permission: "warehouse:view_analytics" as const },
     { section: "ANALİZ" },
     { label: "Hareketler", to: "/movements", icon: Activity, permission: "warehouse:view_analytics" as const },
     { label: "Kullanıcı Aktiviteleri", to: "/user-activity", icon: Activity, permission: "warehouse:view_analytics" as const },

@@ -84,3 +84,17 @@ Yeni kullanıcı izinleri:
 
 - `warehouse:view_map`
 - `warehouse:view_analytics`
+
+## Depo Yerleşimi CSV akışı
+
+Desktop `Depo > Depo Yerleşimi` ekranı ürün masterından bağımsız pick-face ve rezerv planını yönetir. CSV biçimi:
+
+```csv
+sku,pick_face_location,reserve_locations
+AL-R100-ELB,A1-K1-P1,A1-K3-P1|A1-K4-P1
+AL-R100-BAS,A1-K1-P2,A1-K3-P2
+```
+
+Dosya `Import → Validate → Preview → Apply` akışından geçer. Bilinmeyen SKU, tanımsız/geçersiz lokasyon, fiziksel plan dışında kat/pozisyon ve pick-face çakışması kritik hatadır. Uygulama yeni layout sürümünü atomik olarak aktif eder, önceki sürümü arşivler ve hiçbir stok veya paket yaratmaz.
+
+Aktif layout Mal Kabul session'ı açılırken satırlara snapshot edilir. İlk uygun kutu pick-face'e, sonraki kutular CSV sırasındaki reserve lokasyonlara yönlendirilir. Mobil arayüz yalnız hedef lokasyon kodunu gösterir ve mevcut barkod doğrulamasını kullanır.

@@ -16,6 +16,8 @@ import type {
   ReceivingPlacedPackage,
   WarehouseMapSnapshot,
   WarehousePackageListItem,
+  WarehousePlacementLayout,
+  WarehousePlacementPreview,
 } from "../types/warehouse";
 import type { ReceivingLot, ReceivingSession } from "../types/warehouse";
 
@@ -160,6 +162,13 @@ const warehouseDeviceId = () => {
 
 export const warehouseAdminApi = {
   async getWarehouseMap() { return (await request<WarehouseMapSnapshot>("/admin/warehouse-map")).data; },
+  async getPlacementLayout() { return (await request<WarehousePlacementLayout>("/admin/layouts/placement")).data; },
+  async previewPlacementLayout(sourceFilename: string, csvText: string) {
+    return post<WarehousePlacementPreview>("/admin/layouts/placement/preview", { source_filename: sourceFilename, csv_text: csvText });
+  },
+  async applyPlacementLayout(sourceFilename: string, csvText: string, previewHash: string, notes?: string) {
+    return post<WarehousePlacementLayout>("/admin/layouts/placement/apply", { source_filename: sourceFilename, csv_text: csvText, preview_hash: previewHash, notes });
+  },
   async listPackages(filters: { page?: number; limit?: number; query?: string; status?: string; location?: string; lot?: string; date_from?: string; date_to?: string } = {}) {
     const query = new URLSearchParams({ page: String(filters.page || 1), limit: String(filters.limit || 25) });
     for (const key of ["query", "status", "location", "lot", "date_from", "date_to"] as const) if (filters[key]) query.set(key, filters[key]!);
@@ -194,8 +203,8 @@ export const warehouseAdminApi = {
   async listMyReceivingPackages(sessionId: string) {
     return (await request<ReceivingPlacedPackage[]>(`/admin/receiving/sessions/${encodeURIComponent(sessionId)}/my-packages`)).data;
   },
-  async startReceivingSession(lotNumber: string) {
-    return post<ReceivingSession>("/admin/receiving/sessions", { lot_number: lotNumber, device_id: warehouseDeviceId() });
+  async startReceivingSession(lotNumber: string, supplierCode?: string) {
+    return post<ReceivingSession>("/admin/receiving/sessions", { lot_number: lotNumber, supplier_code: supplierCode, device_id: warehouseDeviceId() });
   },
   async getReceivingSession(id: string) {
     return (await request<ReceivingSession>(`/admin/receiving/sessions/${encodeURIComponent(id)}`)).data;

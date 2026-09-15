@@ -89,6 +89,49 @@ export interface WarehouseMapSnapshot {
   };
 }
 
+export interface WarehousePlacementAssignment {
+  id: string;
+  product_id: string;
+  sku: string;
+  product_name: string;
+  supplier_no: string | null;
+  material: string | null;
+  profile_type: string;
+  size: string;
+  pick_group: string;
+  pick_face_location_id: string;
+  pick_face_location: string;
+  reserve_locations: Array<{ id: string; code: string; priority: number; purpose: string; reserve_weight_preference: string }>;
+}
+
+export interface WarehousePlacementLayout {
+  active: null | {
+    id: string;
+    name: string;
+    layout_version: number;
+    source_filename: string | null;
+    status: "ACTIVE" | "ARCHIVED";
+    created_at: string;
+    created_by_username: string | null;
+    sku_count: number;
+    layout: { warehouse: { name: string; width: number; length: number; height: number }; objects: WarehouseLayoutObject[] } | null;
+  };
+  history: Array<{ id: string; layout_version: number; source_filename: string | null; status: string; notes: string | null; created_at: string; created_by_username: string | null; sku_count: number }>;
+  assignments: WarehousePlacementAssignment[];
+  locations: Array<WarehouseMapLocation & { purpose?: string; reserve_weight_preference?: string; active?: number }>;
+  racks: Array<{ rack_code: string; name: string; shelf_count: number; positions_per_shelf: number; status: "ACTIVE" | "RESERVE" | "RESTRICTED" | "DISABLED"; placement_priority: "NORMAL" | "LOW" | "LAST_RESORT"; notes: string | null }>;
+  summary: { assigned_skus: number; placed_skus: number; active_receiving: number; active_lots: string[] };
+}
+
+export interface WarehousePlacementPreview {
+  valid: boolean;
+  preview_hash: string;
+  source_filename: string;
+  summary: { rows_read: number; matched_skus: number; unknown_skus: number; invalid_locations: number; pick_face_conflicts: number; warnings: number; errors: number };
+  rows: Array<WarehousePlacementAssignment & { source_row: number }>;
+  issues: Array<{ severity: "error" | "warning"; code: string; message: string; source_row?: number }>;
+}
+
 export interface WarehousePackageListItem {
   id: string;
   package_code: string;

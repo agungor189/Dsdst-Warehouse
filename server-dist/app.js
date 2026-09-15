@@ -325,6 +325,7 @@ export function createWarehouseApp(config) {
     app.get("/api/admin/receiving/my-active-package", requireSession, (req, res) => forward(req, res, "GET", "/admin/receiving/my-active-package"));
     app.post("/api/admin/receiving/sessions", requireSession, (req, res) => forward(req, res, "POST", "/admin/receiving/sessions", undefined, {
         lot_number: safeQueryText(req.body?.lot_number, 150),
+        supplier_code: safeQueryText(req.body?.supplier_code, 100),
         device_id: safeQueryText(req.body?.device_id, 150),
     }));
     app.get("/api/admin/receiving/sessions/:id", requireSession, (req, res) => forward(req, res, "GET", `/admin/receiving/sessions/${encodeURIComponent(String(req.params.id))}`));
@@ -359,6 +360,17 @@ export function createWarehouseApp(config) {
     });
     app.get("/api/admin/locations", requireSession, (req, res) => forward(req, res, "GET", "/admin/locations"));
     app.get("/api/admin/warehouse-map", requireSession, (req, res) => forward(req, res, "GET", "/admin/warehouse-map"));
+    app.get("/api/admin/layouts/placement", requireSession, (req, res) => forward(req, res, "GET", "/admin/layouts/placement"));
+    app.post("/api/admin/layouts/placement/preview", requireSession, (req, res) => forward(req, res, "POST", "/admin/layouts/placement/preview", undefined, {
+        source_filename: safeQueryText(req.body?.source_filename, 255),
+        csv_text: safeQueryText(req.body?.csv_text, 2 * 1024 * 1024),
+    }));
+    app.post("/api/admin/layouts/placement/apply", requireSession, (req, res) => forward(req, res, "POST", "/admin/layouts/placement/apply", undefined, {
+        source_filename: safeQueryText(req.body?.source_filename, 255),
+        csv_text: safeQueryText(req.body?.csv_text, 2 * 1024 * 1024),
+        preview_hash: safeQueryText(req.body?.preview_hash, 128),
+        notes: safeQueryText(req.body?.notes, 1000),
+    }));
     app.get("/api/admin/packages", requireSession, (req, res) => {
         const query = new URLSearchParams({
             page: String(safePositiveInteger(req.query.page, 1)),

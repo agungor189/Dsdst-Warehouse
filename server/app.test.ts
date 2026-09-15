@@ -194,7 +194,7 @@ describe("Warehouse BFF", () => {
     });
   });
 
-  it("lot session başlangıcında yalnız lot ve cihaz kimliğini Panel'e aktarır", async () => {
+  it("lot session başlangıcında lot, tedarikçi ve cihaz kimliğini güvenli biçimde Panel'e aktarır", async () => {
     let received: { path?: string; body?: unknown } = {};
     const panelUrl = await startPanel((req, res) => {
       received = { path: req.path, body: req.body };
@@ -207,7 +207,23 @@ describe("Warehouse BFF", () => {
     expect(response.status).toBe(200);
     expect(received).toEqual({
       path: "/api/warehouse/v1/admin/receiving/sessions",
-      body: { lot_number: "LOT-1", device_id: "phone-1" },
+      body: { lot_number: "LOT-1", supplier_code: "leak", device_id: "phone-1" },
+    });
+  });
+
+  it("yerleşim CSV önizlemesinde yalnız dosya adı ve CSV metnini Panel'e aktarır", async () => {
+    let received: { path?: string; body?: unknown } = {};
+    const panelUrl = await startPanel((req, res) => {
+      received = { path: req.path, body: req.body };
+      res.json({ success: true, data: { valid: true, preview_hash: "hash" } });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .post("/api/admin/layouts/placement/preview").set("Cookie", sessionCookie)
+      .send({ source_filename: " layout.csv ", csv_text: "sku,pick_face_location\nSKU-1,A1-K1-P1", active: true, created_by: "attacker" });
+    expect(response.status).toBe(200);
+    expect(received).toEqual({
+      path: "/api/warehouse/v1/admin/layouts/placement/preview",
+      body: { source_filename: "layout.csv", csv_text: "sku,pick_face_location\nSKU-1,A1-K1-P1" },
     });
   });
 
