@@ -7,8 +7,8 @@ Telefon ve tablette uygulama bir **Warehouse Operations Terminal** olarak; deskt
 ## Mimari
 
 ```text
-Browser/PWA → aynı origin /api → Warehouse Express BFF → Panel Warehouse API
-                 └─ HttpOnly JWT         └─ x-api-key + panel JWT yalnızca burada eklenir
+Browser/PWA → aynı origin /api → Warehouse Express BFF → Panel Warehouse API → CUPS
+                 └─ HttpOnly JWT             └────────→ Label Printer API (şablon/PDF)
 ```
 
 Browser hiçbir API anahtarı, panel adresi veya JavaScript tarafından okunabilir JWT bilmez. Login sonucu BFF tarafından `HttpOnly`, `SameSite=Strict` cookie'ye çevrilir. BFF yalnızca tanımlı auth, toplama ve Warehouse Admin rotalarını kabul eder; genel amaçlı proxy değildir. Panel yanıtları önbelleğe alınmaz, anahtar/token içeren alanlar veya metinler frontend'e dönmeden redakte edilir.
@@ -30,6 +30,8 @@ API anahtarı `read:warehouse_orders`, `read:products`, `read:bom` ve `write:war
 ```env
 PANEL_API_BASE_URL=http://panel-address:3000
 WAREHOUSE_API_KEY=replace-with-warehouse-api-key
+LABEL_PRINTER_URL=http://label-printer:3010
+LABEL_PRINTER_API_KEY=replace-with-shared-label-api-key
 # HTTPS üzerinden yayınlıyorsanız Secure cookie kullanın:
 COOKIE_SECURE=true
 ```
@@ -70,7 +72,9 @@ Toplama adımındaki **Kamera ile Tara** düğmesi cihazın arka kamerasıyla QR
 
 ## Warehouse Admin
 
-Yetkili kullanıcılar ana sayfadaki **Warehouse Admin** kartından mal kabul, etiketleme, paket yerleştirme, taşıma, lokasyon, sayım, baskı geçmişi ve merkezi şablon ekranlarına ulaşır. Mal Kabul ekranına CSV yüklenmez: kullanıcı Panel ürün master importunda tanımlanmış lotu girer, ortak server-side oturuma katılır ve tedarikçi no → etiket → önerilen lokasyon → raf okutma akışını tamamlar. Aktif oturum ve ilerleme kontrollü polling ile telefon, tablet ve PC'de ortak görünür; refresh işlem durumunu kaybettirmez. Etiketleme ve tüm paket/lokasyon adımları manuel girişin yanında aynı kamera tarayıcısını kullanır.
+Yetkili kullanıcılar ana sayfadaki **Warehouse Admin** kartından mal kabul, etiketleme, paket yerleştirme, taşıma, lokasyon, sayım, baskı geçmişi ve canlı şablon ekranlarına ulaşır. Mal Kabul ekranına CSV yüklenmez: kullanıcı Panel ürün master importunda tanımlanmış lotu girer, ortak server-side oturuma katılır ve tedarikçi no → etiket → önerilen lokasyon → raf okutma akışını tamamlar. Aktif oturum ve ilerleme kontrollü polling ile telefon, tablet ve PC'de ortak görünür; refresh işlem durumunu kaybettirmez. Etiketleme ve tüm paket/lokasyon adımları manuel girişin yanında aynı kamera tarayıcısını kullanır.
+
+Warehouse etiket tasarımı, QR veya barkod üretmez. Mal kabulda `goods_receipt`, raf etiketinde `location` purpose için Label Printer'ın o anda kayıtlı varsayılan şablonunu kullanır. Önizleme PDF'i ve Panel/CUPS baskısı aynı Label Printer headless renderer endpoint'inden gelir. Label Printer'da tasarım kaydedildiğinde sonraki önizleme ve baskı Warehouse deploy edilmeden güncellenir.
 
 Erişim menüde gizlenmekle kalmaz: Panel API her işlem için ilgili `warehouse:*` kullanıcı yetkisini ayrıca kontrol eder. `admin` rolü tüm Warehouse Admin izinlerine sahiptir.
 

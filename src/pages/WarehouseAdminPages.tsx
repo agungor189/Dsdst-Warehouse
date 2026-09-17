@@ -1,11 +1,12 @@
 import {
-  Boxes, CheckCircle2, ClipboardCheck, MapPin, Move, PackageCheck, Pause, Play, Printer, RefreshCw, Scale, Settings2, X,
+  Boxes, CheckCircle2, ClipboardCheck, Eye, MapPin, Move, PackageCheck, Pause, Play, Printer, RefreshCw, Scale, Settings2, X,
 } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ScanInput } from "../features/picking/ScanInput";
 import { hasWarehousePermission, useAuth } from "../features/auth/AuthContext";
-import { ApiError, getErrorMessage, warehouseAdminApi } from "../lib/api";
+import { ApiError, getErrorMessage, labelApi, warehouseAdminApi } from "../lib/api";
+import { locationLabelData, openPdfBlob, packageLabelData } from "../lib/labels";
 import type { ReceivingPlacedPackage, ReceivingSession, WarehouseLocation, WarehousePackage, WarehousePermission } from "../types/warehouse";
 
 const permissionLabels: Record<WarehousePermission, string> = {
@@ -227,6 +228,11 @@ export function InboundPage() {
     try { const result = await warehouseAdminApi.queuePrint(pkg.id, pkg.claim_token); setPkg(result.package); setMessage("Etiket baskı kuyruğuna gönderildi."); }
     catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); }
   };
+  const preview = async () => {
+    if (!pkg) return; setBusy(true); setError("");
+    try { openPdfBlob(await labelApi.preview("goods_receipt", packageLabelData(pkg))); }
+    catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); }
+  };
   const placeAt = async (code: string, reason?: string) => {
     if (!pkg || (!suggestion && !reason)) return false; setBusy(true); setError("");
     try {
@@ -273,7 +279,7 @@ export function InboundPage() {
           <ScanInput key={scanCycle} busy={busy} onScan={claim} label="Tedarikçi No Tara / Gir" placeholder="A012-B34" cameraTitle="Tedarikçi numarasını okutun" mode="both" ocrCandidates={[...new Set(supplierCodes)]}/>
         )}
         {pkg && <div className="space-y-3"><Notice message="Devam eden paketiniz var"/><PackageCard pkg={pkg}/>{pkg.image_path_snapshot && <img className="max-h-52 w-full rounded-2xl bg-canvas object-contain" src={`/api/products/${encodeURIComponent(pkg.product_id)}/image`} alt={pkg.product_name_snapshot}/>}<div className="grid grid-cols-2 gap-2 text-sm"><p className="rounded-xl bg-canvas p-3"><b>Tedarikçi</b><br/>{pkg.supplier_no_snapshot || pkg.supplier_code}</p><p className="rounded-xl bg-canvas p-3"><b>Lot</b><br/>{pkg.lot_number}</p><p className="rounded-xl bg-canvas p-3"><b>Paket</b><br/>{pkg.package_number}/{pkg.total_packages}</p><p className="rounded-xl bg-canvas p-3"><b>Ağırlık</b><br/>{pkg.package_weight_kg_snapshot || "—"} kg</p></div>
-          {["CLAIMED", "PRINT_FAILED"].includes(pkg.status) && <button className="primary-button min-h-16 w-full text-lg" disabled={busy} onClick={() => void print()}><Printer/> {pkg.status === "PRINT_FAILED" ? "Etiketi yeniden bas" : "Etiket Yazdır"}</button>}
+          {["CLAIMED", "PRINT_FAILED"].includes(pkg.status) && <div className="grid grid-cols-2 gap-2"><button className="secondary-button min-h-14" disabled={busy} onClick={() => void preview()}><Eye/>Etiket Önizle</button><button className="primary-button min-h-14" disabled={busy} onClick={() => void print()}><Printer/> {pkg.status === "PRINT_FAILED" ? "Yeniden Yazdır" : "Yazdır"}</button></div>}
           {pkg.status === "LABEL_QUEUED" && <Notice message="Etiket basılıyor; yazıcı sonucu bekleniyor…"/>}
           {pkg.status === "LABELED" && !suggestion && (
             <Notice message={locationRetrying ? "Planlanan raf yüklenemedi. Tekrar deneniyor…" : "Planlanan lokasyon yükleniyor…"}/>
@@ -303,7 +309,8 @@ export function LabelingPage() {
   const [pkg, setPkg] = useState<WarehousePackage | null>(null); const [busy, setBusy] = useState(false); const [message, setMessage] = useState(""); const [error, setError] = useState("");
   const claim = async (code: string) => { setBusy(true); setError(""); try { setPkg(await warehouseAdminApi.claimNext(code)); setMessage(""); return true; } catch (reason) { setError(getErrorMessage(reason)); return false; } finally { setBusy(false); } };
   const print = async () => { if (!pkg) return; setBusy(true); setError(""); try { const result = await warehouseAdminApi.queuePrint(pkg.id, pkg.claim_token); setPkg(result.package); setMessage(`${pkg.package_code} baskı kuyruğuna eklendi.`); } catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); } };
-  return <PermissionPage permission="warehouse:print_labels"><div className="space-y-5"><PageIntro eyebrow="Etiketleme" title="Sıradaki paketi ayır" description="Tedarikçi kodu paketi kısa süreli ayırır. Barkod/QR PDF’i kuyrukta hazırlanıp CUPS yazıcısına gönderilir."/>{message && <Notice message={message}/>} {error && <Notice error message={error}/>}<ScanInput busy={busy} onScan={claim} label="Tedarikçi kodunu okutun" placeholder="Tedarikçi kodu" cameraTitle="Tedarikçi kodunu okutun"/>{pkg && <><PackageCard pkg={pkg}/><button className="primary-button w-full" disabled={busy} onClick={() => void print()}><Printer/>Etiketi kuyruğa gönder</button></>}</div></PermissionPage>;
+  const preview = async () => { if (!pkg) return; setBusy(true); setError(""); try { openPdfBlob(await labelApi.preview("goods_receipt", packageLabelData(pkg))); } catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); } };
+  return <PermissionPage permission="warehouse:print_labels"><div className="space-y-5"><PageIntro eyebrow="Etiketleme" title="Sıradaki paketi ayır" description="Tedarikçi kodu paketi kısa süreli ayırır. Label Printer'ın güncel şablonu CUPS kuyruğunda basılır."/>{message && <Notice message={message}/>} {error && <Notice error message={error}/>}<ScanInput busy={busy} onScan={claim} label="Tedarikçi kodunu okutun" placeholder="Tedarikçi kodu" cameraTitle="Tedarikçi kodunu okutun"/>{pkg && <><PackageCard pkg={pkg}/><div className="grid grid-cols-2 gap-2"><button className="secondary-button" disabled={busy} onClick={() => void preview()}><Eye/>Etiket Önizle</button><button className="primary-button" disabled={busy} onClick={() => void print()}><Printer/>Yazdır</button></div></>}</div></PermissionPage>;
 }
 
 function TwoStepPackagePage({ mode }: { mode: "place" | "move" }) {
@@ -318,11 +325,13 @@ export const PlacementPage = () => <TwoStepPackagePage mode="place"/>;
 export const MoveStockPage = () => <TwoStepPackagePage mode="move"/>;
 
 export function LocationsPage() {
-  const [locations, setLocations] = useState<WarehouseLocation[]>([]); const [code, setCode] = useState(""); const [capacity, setCapacity] = useState("1"); const [error, setError] = useState("");
+  const [locations, setLocations] = useState<WarehouseLocation[]>([]); const [code, setCode] = useState(""); const [capacity, setCapacity] = useState("1"); const [error, setError] = useState(""); const [message, setMessage] = useState(""); const [busyId, setBusyId] = useState("");
   const reload = () => warehouseAdminApi.listLocations().then(setLocations).catch((reason) => setError(getErrorMessage(reason)));
   useEffect(() => { void reload(); }, []);
   const create = async (event: FormEvent) => { event.preventDefault(); setError(""); try { await warehouseAdminApi.createLocation({ code, package_capacity: Number(capacity) }); setCode(""); setCapacity("1"); reload(); } catch (reason) { setError(getErrorMessage(reason)); } };
-  return <PermissionPage permission="warehouse:manage_locations"><div className="space-y-5"><PageIntro eyebrow="Lokasyonlar" title="Kapasite yönetimi" description="Yerleştirme önerisi en düşük doluluk ve kod sırasına göre deterministik olarak seçilir."/>{error && <Notice error message={error}/>}<form onSubmit={create} className="grid grid-cols-[1fr_90px] gap-3 rounded-2xl border border-line bg-white p-4"><input className="field uppercase" value={code} onChange={(event) => setCode(event.target.value)} placeholder="A1-K1-P1" required/><input className="field" type="number" min="1" value={capacity} onChange={(event) => setCapacity(event.target.value)}/><button className="primary-button col-span-2">Lokasyon ekle</button></form><div className="space-y-2">{locations.map((location) => <div className="rounded-2xl border border-line bg-white p-4" key={location.id}><b>{location.code}</b><span className="float-right font-black text-moss">{location.occupied_packages}/{location.package_capacity}</span><div className="mt-3 h-2 overflow-hidden rounded bg-line"><span className="block h-full bg-moss" style={{ width: `${Math.min(100, location.occupied_packages / location.package_capacity * 100)}%` }}/></div></div>)}</div></div></PermissionPage>;
+  const preview = async (location: WarehouseLocation) => { setBusyId(location.id); setError(""); try { openPdfBlob(await labelApi.preview("location", locationLabelData(location.code))); } catch (reason) { setError(getErrorMessage(reason)); } finally { setBusyId(""); } };
+  const print = async (location: WarehouseLocation) => { setBusyId(location.id); setError(""); try { await warehouseAdminApi.queueLocationPrint(location.id); setMessage(`${location.code} etiketi baskı kuyruğuna eklendi.`); } catch (reason) { setError(getErrorMessage(reason)); } finally { setBusyId(""); } };
+  return <PermissionPage permission="warehouse:manage_locations"><div className="space-y-5"><PageIntro eyebrow="Lokasyonlar" title="Kapasite yönetimi" description="Yerleştirme önerisi en düşük doluluk ve kod sırasına göre deterministik olarak seçilir."/>{message && <Notice message={message}/>} {error && <Notice error message={error}/>}<form onSubmit={create} className="grid grid-cols-[1fr_90px] gap-3 rounded-2xl border border-line bg-white p-4"><input className="field uppercase" value={code} onChange={(event) => setCode(event.target.value)} placeholder="A1-K1-P1" required/><input className="field" type="number" min="1" value={capacity} onChange={(event) => setCapacity(event.target.value)}/><button className="primary-button col-span-2">Lokasyon ekle</button></form><div className="space-y-2">{locations.map((location) => <div className="rounded-2xl border border-line bg-white p-4" key={location.id}><b>{location.code}</b><span className="float-right font-black text-moss">{location.occupied_packages}/{location.package_capacity}</span><div className="mt-3 h-2 overflow-hidden rounded bg-line"><span className="block h-full bg-moss" style={{ width: `${Math.min(100, location.occupied_packages / location.package_capacity * 100)}%` }}/></div><div className="mt-3 grid grid-cols-2 gap-2"><button className="secondary-button" disabled={busyId === location.id} onClick={() => void preview(location)}><Eye size={17}/>Önizle</button><button className="secondary-button" disabled={busyId === location.id} onClick={() => void print(location)}><Printer size={17}/>Etiket Yazdır</button></div></div>)}</div></div></PermissionPage>;
 }
 
 export function StockCountPage() {
@@ -341,12 +350,11 @@ export function PrintJobsPage() {
 }
 
 export function LabelTemplatesPage() {
-  const [templates, setTemplates] = useState<Array<Record<string, unknown>>>([]); const [selected, setSelected] = useState<Record<string, unknown> | null>(null); const [json, setJson] = useState(""); const [name, setName] = useState(""); const [message, setMessage] = useState(""); const [error, setError] = useState("");
-  const reload = async () => { try { const data = await warehouseAdminApi.listTemplates(); setTemplates(data); if (!selected && data[0]) { setSelected(data[0]); setName(String(data[0].name || "")); setJson(JSON.stringify(data[0].template, null, 2)); } } catch (reason) { setError(getErrorMessage(reason)); } };
+  const [templates, setTemplates] = useState<Array<Record<string, unknown>>>([]); const [selected, setSelected] = useState<Record<string, unknown> | null>(null); const [json, setJson] = useState(""); const [error, setError] = useState("");
+  const reload = async () => { try { const data = await labelApi.listTemplates(); setTemplates(data); if (!selected && data[0]) { setSelected(data[0]); setJson(JSON.stringify(data[0], null, 2)); } } catch (reason) { setError(getErrorMessage(reason)); } };
   useEffect(() => { void reload(); }, []);
-  const choose = (template: Record<string, unknown>) => { setSelected(template); setName(String(template.name || "")); setJson(JSON.stringify(template.template, null, 2)); setMessage(""); setError(""); };
-  const save = async () => { try { const template = JSON.parse(json); await warehouseAdminApi.saveTemplate({ id: selected?.id, name, template, is_default: selected?.is_default === 1 }); setMessage("Şablon yeni sürüm olarak kaydedildi."); await reload(); } catch (reason) { setError(reason instanceof SyntaxError ? "JSON biçimi geçersiz." : getErrorMessage(reason)); } };
-  return <PermissionPage permission="warehouse:edit_label_templates"><div className="space-y-5"><PageIntro eyebrow="Etiket Şablonları" title="Merkezi JSON şablonu" description="Label Printer tasarım JSON'u değişmeden Panel veritabanında sürümlenir; baskı işleri seçilen snapshot'ı kullanır."/>{message && <Notice message={message}/>} {error && <Notice error message={error}/>}<div className="flex gap-2 overflow-x-auto">{templates.map((template) => <button key={String(template.id)} className="filter-chip" onClick={() => choose(template)}>{String(template.name)}</button>)}</div><input className="field" value={name} onChange={(event) => setName(event.target.value)} placeholder="Şablon adı"/><textarea className="field min-h-96 font-mono text-xs" spellCheck={false} value={json} onChange={(event) => setJson(event.target.value)}/><button className="primary-button w-full" onClick={() => void save()}>Şablonu kaydet</button></div></PermissionPage>;
+  const choose = (template: Record<string, unknown>) => { setSelected(template); setJson(JSON.stringify(template, null, 2)); setError(""); };
+  return <PermissionPage permission="warehouse:edit_label_templates"><div className="space-y-5"><PageIntro eyebrow="Etiket Şablonları" title="Label Printer canlı şablonları" description="Şablon tasarımı Label Printer'da yönetilir. Warehouse her önizleme ve baskıda purpose için son kaydedilen varsayılanı alır."/>{error && <Notice error message={error}/>}<button className="secondary-button" onClick={() => void reload()}><RefreshCw size={17}/>Yenile</button><div className="flex gap-2 overflow-x-auto">{templates.map((template) => <button key={String(template.id)} className="filter-chip" onClick={() => choose(template)}>{String(template.name)} · {String(template.purpose)}</button>)}</div><textarea className="field min-h-96 font-mono text-xs" readOnly value={json}/></div></PermissionPage>;
 }
 
 export { permissionLabels };

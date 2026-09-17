@@ -299,6 +299,50 @@ describe("Warehouse BFF", () => {
     expect(receivedQuery).toEqual({ page: "2", limit: "100", query: "PCI", status: "PLACED", location: "A1", lot: "L1" });
   });
 
+  it("Label Printer purpose şablonlarını server-side API anahtarıyla okur", async () => {
+    let received: { path?: string; query?: unknown; key?: string } = {};
+    const labelUrl = await startPanel((req, res) => {
+      received = { path: req.path, query: req.query, key: req.header("x-api-key") };
+      res.json({ templates: [{ id: "receipt-v2", purpose: "goods_receipt" }] });
+    });
+    const response = await request(createWarehouseApp({ labelPrinterBaseUrl: labelUrl, labelPrinterApiKey: "label-secret" }))
+      .get("/api/labels/templates?purpose=goods_receipt").set("Cookie", sessionCookie);
+    expect(response.status).toBe(200);
+    expect(response.body.data[0].id).toBe("receipt-v2");
+    expect(received).toEqual({ path: "/api/v1/templates", query: { purpose: "goods_receipt" }, key: "label-secret" });
+  });
+
+  it("etiket önizlemesini purpose ve Warehouse verisiyle PDF olarak proxyler", async () => {
+    let receivedBody: unknown;
+    const labelUrl = await startPanel((req, res) => {
+      receivedBody = req.body;
+      res.type("application/pdf").send(Buffer.from("%PDF-preview"));
+    });
+    const response = await request(createWarehouseApp({ labelPrinterBaseUrl: labelUrl }))
+      .post("/api/labels/preview").set("Cookie", sessionCookie)
+      .send({ purpose: "location", data: { Lokasyon: "A1-K1-P1" }, unsafe: true });
+    expect(response.status).toBe(200);
+    expect(response.headers["content-type"]).toContain("application/pdf");
+    expect(receivedBody).toEqual({ purpose: "location", data: { Lokasyon: "A1-K1-P1" } });
+  });
+
+  it("paket ve lokasyon baskısında purpose değerini istemciden bağımsız sabitler", async () => {
+    const received: Array<{ path: string; body: unknown }> = [];
+    const panelUrl = await startPanel((req, res) => {
+      received.push({ path: req.path, body: req.body });
+      res.json({ success: true, data: { job: { id: "job-1" } } });
+    });
+    const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET });
+    await request(app).post("/api/admin/packages/pkg-1/print").set("Cookie", sessionCookie)
+      .send({ idempotency_key: "p-1", template_purpose: "shipping" });
+    await request(app).post("/api/admin/locations/loc-1/print").set("Cookie", sessionCookie)
+      .send({ idempotency_key: "l-1", template_purpose: "custom" });
+    expect(received).toEqual([
+      { path: "/api/warehouse/v1/admin/packages/pkg-1/print", body: { idempotency_key: "p-1", template_purpose: "goods_receipt" } },
+      { path: "/api/warehouse/v1/admin/locations/loc-1/print", body: { idempotency_key: "l-1", template_purpose: "location" } },
+    ]);
+  });
+
   it("tamamlama notunu kırpar ve bilinmeyen body alanlarını panele göndermez", async () => {
     let receivedBody: unknown;
     const panelUrl = await startPanel((req, res) => {

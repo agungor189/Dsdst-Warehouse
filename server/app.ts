@@ -5,6 +5,8 @@ import path from "node:path";
 export interface WarehouseBffConfig {
   panelApiBaseUrl?: string;
   warehouseApiKey?: string;
+  labelPrinterBaseUrl?: string;
+  labelPrinterApiKey?: string;
   timeoutMs?: number;
   staticDir?: string;
   cookieSecure?: boolean;
@@ -80,6 +82,17 @@ const configError = (config: WarehouseBffConfig) => {
   return null;
 };
 
+const labelConfigError = (config: WarehouseBffConfig) => {
+  if (!config.labelPrinterBaseUrl) return "missing";
+  try {
+    const url = new URL(config.labelPrinterBaseUrl);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return "invalid";
+  } catch {
+    return "invalid";
+  }
+  return null;
+};
+
 export function createWarehouseApp(config: WarehouseBffConfig) {
   const app = express();
   const timeoutMs = config.timeoutMs ?? 8_000;
@@ -99,6 +112,36 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     next();
   });
   app.get("/health", (_req, res) => res.json({ status: "ok" }));
+
+  const fetchLabelPrinter = async (res: ExpressResponse, pathName: string, init: RequestInit = {}) => {
+    if (labelConfigError(config)) {
+      res.status(503).json({ success: false, error: { code: "LABEL_PRINTER_NOT_CONFIGURED", message: "Label Printer bağlantısı sunucuda yapılandırılmamış." } });
+      return null;
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(`${config.labelPrinterBaseUrl!.replace(/\/$/, "")}${pathName}`, {
+        ...init,
+        redirect: "error",
+        signal: controller.signal,
+        headers: {
+          ...(init.headers || {}),
+          ...(config.labelPrinterApiKey ? { "x-api-key": config.labelPrinterApiKey } : {}),
+        },
+      });
+    } catch (error) {
+      const timedOut = error instanceof Error && error.name === "AbortError";
+      logger.error(`[warehouse-bff] ${timedOut ? "LABEL_PRINTER_TIMEOUT" : "LABEL_PRINTER_UNAVAILABLE"}`);
+      res.status(timedOut ? 504 : 502).json({ success: false, error: {
+        code: timedOut ? "LABEL_PRINTER_TIMEOUT" : "LABEL_PRINTER_UNAVAILABLE",
+        message: timedOut ? "Label Printer zaman aşımına uğradı." : "Label Printer bağlantısı kurulamadı.",
+      } });
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
 
   const configurationFailure = (res: ExpressResponse) => {
     const invalidConfig = configError(config);
@@ -229,6 +272,34 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
   app.post("/api/auth/logout", (_req, res) => {
     res.clearCookie(SESSION_COOKIE, cookieOptions);
     res.json({ success: true, data: null });
+  });
+
+  app.get("/api/labels/templates", requireSession, async (req, res) => {
+    const purpose = safeQueryText(req.query.purpose, 40);
+    const query = purpose ? `?purpose=${encodeURIComponent(purpose)}` : "";
+    const upstream = await fetchLabelPrinter(res, `/api/v1/templates${query}`, { headers: { Accept: "application/json" } });
+    if (!upstream) return;
+    const raw = await upstream.text();
+    if (!upstream.ok) return res.status(upstream.status).type("application/json").send(raw);
+    try {
+      const parsed = JSON.parse(raw) as { templates?: unknown };
+      return res.json({ success: true, data: Array.isArray(parsed.templates) ? parsed.templates : [] });
+    } catch {
+      return res.status(502).json({ success: false, error: { code: "LABEL_PRINTER_INVALID_RESPONSE", message: "Label Printer geçersiz yanıt verdi." } });
+    }
+  });
+
+  app.post("/api/labels/preview", requireSession, async (req, res) => {
+    const purpose = safeQueryText(req.body?.purpose, 40);
+    const data = req.body?.data && typeof req.body.data === "object" && !Array.isArray(req.body.data) ? req.body.data : {};
+    const upstream = await fetchLabelPrinter(res, "/api/v1/render", {
+      method: "POST",
+      headers: { Accept: "application/pdf", "Content-Type": "application/json" },
+      body: JSON.stringify({ purpose, data }),
+    });
+    if (!upstream) return;
+    const contentType = upstream.headers.get("content-type") || "application/octet-stream";
+    return res.status(upstream.status).type(contentType).send(Buffer.from(await upstream.arrayBuffer()));
   });
 
   const forward = async (
@@ -393,7 +464,10 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
   app.get("/api/admin/packages/by-code/:code", requireSession, (req, res) =>
     forward(req, res, "GET", `/admin/packages/by-code/${encodeURIComponent(String(req.params.code))}`));
   app.post("/api/admin/packages/:id/print", requireSession, (req, res) =>
-    forward(req, res, "POST", `/admin/packages/${encodeURIComponent(String(req.params.id))}/print`, undefined, safeAdminBody(req.body)));
+    forward(req, res, "POST", `/admin/packages/${encodeURIComponent(String(req.params.id))}/print`, undefined, {
+      ...safeAdminBody(req.body),
+      template_purpose: "goods_receipt",
+    }));
   app.post("/api/admin/packages/:id/release-receiving", requireSession, (req, res) =>
     forward(req, res, "POST", `/admin/packages/${encodeURIComponent(String(req.params.id))}/release-receiving`, undefined, {
       device_id: safeQueryText(req.body?.device_id, 150),
@@ -403,6 +477,11 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     return forward(req, res, "GET", "/admin/print-jobs", query);
   });
   app.get("/api/admin/locations", requireSession, (req, res) => forward(req, res, "GET", "/admin/locations"));
+  app.post("/api/admin/locations/:id/print", requireSession, (req, res) =>
+    forward(req, res, "POST", `/admin/locations/${encodeURIComponent(String(req.params.id))}/print`, undefined, {
+      ...safeAdminBody(req.body),
+      template_purpose: "location",
+    }));
   app.get("/api/admin/warehouse-map", requireSession, (req, res) => forward(req, res, "GET", "/admin/warehouse-map"));
   app.get("/api/admin/layouts/placement", requireSession, (req, res) => forward(req, res, "GET", "/admin/layouts/placement"));
   app.post("/api/admin/layouts/placement/preview", requireSession, (req, res) => forward(req, res, "POST", "/admin/layouts/placement/preview", undefined, {

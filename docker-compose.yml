@@ -6,6 +6,8 @@ services:
     environment:
       PANEL_API_BASE_URL: ${PANEL_API_BASE_URL}
       WAREHOUSE_API_KEY: ${WAREHOUSE_API_KEY}
+      LABEL_PRINTER_URL: ${LABEL_PRINTER_URL:-http://host.docker.internal:3010}
+      LABEL_PRINTER_API_KEY: ${LABEL_PRINTER_API_KEY:-}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       PORT: 3006
     ports:

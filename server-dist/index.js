@@ -7,6 +7,8 @@ const port = Number(process.env.PORT) || 3006;
 const app = createWarehouseApp({
     panelApiBaseUrl: process.env.PANEL_API_BASE_URL,
     warehouseApiKey: process.env.WAREHOUSE_API_KEY,
+    labelPrinterBaseUrl: process.env.LABEL_PRINTER_URL || process.env.LABEL_RENDERER_URL,
+    labelPrinterApiKey: process.env.LABEL_PRINTER_API_KEY || process.env.LABEL_RENDERER_API_KEY,
     cookieSecure: process.env.COOKIE_SECURE === "true",
     staticDir: path.resolve(currentDir, "../dist"),
 });

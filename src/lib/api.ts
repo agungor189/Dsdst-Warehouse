@@ -83,6 +83,40 @@ const request = async <T>(path: string, init: RequestInit = {}): Promise<ApiEnve
   return body as ApiEnvelope<T>;
 };
 
+const requestPdf = async (path: string, body: Record<string, unknown>): Promise<Blob> => {
+  let response: Response;
+  try {
+    response = await fetch(`/api${path}`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { Accept: "application/pdf", "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError("Label Printer bağlantısı kurulamadı.", undefined, "NETWORK_ERROR");
+  }
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({})) as { error?: { code?: string; message?: string } | string };
+    const detail = typeof error.error === "string" ? error.error : error.error?.message;
+    throw new ApiError(detail || "Etiket önizlemesi oluşturulamadı.", response.status, typeof error.error === "object" ? error.error?.code : undefined);
+  }
+  return response.blob();
+};
+
+export type LabelTemplatePurpose = "goods_receipt" | "location" | "product_package" | "kit" | "shipping" | "custom";
+
+export const labelApi = {
+  async listTemplates(purpose?: LabelTemplatePurpose) {
+    const query = purpose ? `?purpose=${encodeURIComponent(purpose)}` : "";
+    const response = await request<{ templates?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>(`/labels/templates${query}`);
+    const data = response.data as { templates?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>;
+    return Array.isArray(data) ? data : data?.templates || [];
+  },
+  preview(purpose: LabelTemplatePurpose, data: Record<string, unknown>) {
+    return requestPdf("/labels/preview", { purpose, data });
+  },
+};
+
 export const warehouseApi = {
   async listOrders(page = 1, limit = 100) {
     const result = await request<WarehouseOrderSummary[]>(`/orders?page=${page}&limit=${limit}`);
@@ -224,6 +258,12 @@ export const warehouseAdminApi = {
   async queuePrint(packageId: string, claimToken?: string | null) {
     return post<{ package: WarehousePackage; job: Record<string, unknown>; idempotent: boolean }>(`/admin/packages/${encodeURIComponent(packageId)}/print`, {
       claim_token: claimToken || undefined,
+      idempotency_key: crypto.randomUUID(),
+      device_id: warehouseDeviceId(),
+    });
+  },
+  async queueLocationPrint(locationId: string) {
+    return post<Record<string, unknown>>(`/admin/locations/${encodeURIComponent(locationId)}/print`, {
       idempotency_key: crypto.randomUUID(),
       device_id: warehouseDeviceId(),
     });

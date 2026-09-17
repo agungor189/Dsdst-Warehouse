@@ -234,6 +234,9 @@ export interface WarehousePackage {
   name_tr_snapshot?: string | null;
   name_en_snapshot?: string | null;
   material_snapshot?: string | null;
+  series_snapshot?: string | null;
+  model_snapshot?: string | null;
+  form_snapshot?: string | null;
   size_snapshot?: string | null;
   unit_weight_g_snapshot?: number;
   package_weight_kg_snapshot?: number;
