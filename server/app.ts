@@ -1,6 +1,7 @@
 import express, { type NextFunction, type Request, type Response as ExpressResponse } from "express";
 import helmet from "helmet";
 import path from "node:path";
+import { createLoginRateLimit, type LoginRateLimitOptions } from "./loginRateLimit.js";
 
 export interface WarehouseBffConfig {
   panelApiBaseUrl?: string;
@@ -11,6 +12,8 @@ export interface WarehouseBffConfig {
   staticDir?: string;
   cookieSecure?: boolean;
   logger?: Pick<Console, "error">;
+  loginRateLimit?: LoginRateLimitOptions;
+  trustProxyHops?: number;
 }
 
 type ProxyMethod = "GET" | "POST";
@@ -104,6 +107,10 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     path: "/",
   };
 
+  if (Number.isInteger(config.trustProxyHops) && Number(config.trustProxyHops) > 0) {
+    app.set("trust proxy", Number(config.trustProxyHops));
+  }
+
   app.disable("x-powered-by");
   app.use(helmet({ contentSecurityPolicy: false }));
   app.use(express.json({ limit: "2mb", strict: true }));
@@ -112,6 +119,7 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     next();
   });
   app.get("/health", (_req, res) => res.json({ status: "ok" }));
+  const loginRateLimit = createLoginRateLimit(config.loginRateLimit);
 
   const fetchLabelPrinter = async (res: ExpressResponse, pathName: string, init: RequestInit = {}) => {
     if (labelConfigError(config)) {
@@ -210,7 +218,7 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     next();
   };
 
-  app.post("/api/auth/login", async (req, res) => {
+  app.post("/api/auth/login", loginRateLimit, async (req, res) => {
     if (configurationFailure(res)) return;
     const username = typeof req.body?.username === "string" ? req.body.username.trim().slice(0, 254) : "";
     const password = typeof req.body?.password === "string" ? req.body.password.slice(0, 1024) : "";

@@ -161,6 +161,27 @@ describe("Warehouse BFF", () => {
     expect(response.headers["set-cookie"]).toBeUndefined();
   });
 
+  it("login proxy'sini IP ve kullanıcı adı birleşimine göre sınırlar", async () => {
+    const panelRequest = vi.fn((_req, res) => res.status(401).json({ success: false, error: { code: "AUTH_FAILED", message: "Geçersiz giriş." } }));
+    const panelUrl = await startPanel(panelRequest);
+    const app = createWarehouseApp({
+      panelApiBaseUrl: panelUrl,
+      warehouseApiKey: SECRET,
+      loginRateLimit: { maxAttempts: 2, windowMs: 60_000 },
+    });
+
+    expect((await request(app).post("/api/auth/login").send({ username: "Alper", password: "wrong" })).status).toBe(401);
+    expect((await request(app).post("/api/auth/login").send({ username: "alper", password: "wrong" })).status).toBe(401);
+    const blocked = await request(app).post("/api/auth/login").send({ username: "ALPER", password: "wrong" });
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.error.code).toBe("TOO_MANY_REQUESTS");
+    expect(blocked.headers["retry-after"]).toBeDefined();
+    expect(panelRequest).toHaveBeenCalledTimes(2);
+
+    const otherUser = await request(app).post("/api/auth/login").send({ username: "Ayşe", password: "wrong" });
+    expect(otherUser.status).toBe(401);
+  });
+
   it("verify-pick için yalnızca güvenli body alanlarını aktarır", async () => {
     let receivedBody: unknown;
     const panelUrl = await startPanel((req, res) => {

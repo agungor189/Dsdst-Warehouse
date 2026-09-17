@@ -30,10 +30,12 @@ API anahtarı `read:warehouse_orders`, `read:products`, `read:bom` ve `write:war
 ```env
 PANEL_API_BASE_URL=http://panel-address:3000
 WAREHOUSE_API_KEY=replace-with-warehouse-api-key
-LABEL_PRINTER_URL=http://label-printer:3010
-LABEL_PRINTER_API_KEY=replace-with-shared-label-api-key
+LABEL_RENDERER_URL=http://warehouse-label-renderer:3010
+LABEL_RENDERER_API_KEY=replace-with-shared-label-api-key
 # HTTPS üzerinden yayınlıyorsanız Secure cookie kullanın:
 COOKIE_SECURE=true
+# Güvenilir tek reverse proxy varsa gerçek istemci IP'si için:
+TRUST_PROXY_HOPS=1
 ```
 
 Bu değişkenler Vite build argümanı değildir. `.env`, Docker build context'ine de alınmaz.
@@ -43,8 +45,11 @@ Bu değişkenler Vite build argümanı değildir. `.env`, Docker build context'i
 ```bash
 cp .env.example .env
 # .env değerlerini doldurun
+docker network create dsdst-internal # sunucuda yalnız ilk kurulumda
 docker compose up --build -d
 ```
+
+Warehouse container'ı non-root ve salt-okunur root filesystem ile, `no-new-privileges` ve tüm Linux capability'leri düşürülmüş olarak çalışır. Renderer host portundan erişilmez; Warehouse yalnız `dsdst-internal` ağı üzerinden bağlanır. Login proxy'si Panel limiter'ından bağımsız olarak başarısız denemeleri IP + normalize kullanıcı adı başına 15 dakikada 10 deneme ile sınırlar.
 
 Cloudflare tarafında `depo.dsdst.com` origin'i `http://<sunucu>:3006` hedefine yönlendirilebilir. Browser uygulamaya HTTPS ile ulaşıyorsa `.env` içinde `COOKIE_SECURE=true` kullanın; yalnız doğrudan HTTP ile yerel testte `false` bırakın.
 

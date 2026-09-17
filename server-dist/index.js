@@ -10,6 +10,7 @@ const app = createWarehouseApp({
     labelPrinterBaseUrl: process.env.LABEL_PRINTER_URL || process.env.LABEL_RENDERER_URL,
     labelPrinterApiKey: process.env.LABEL_PRINTER_API_KEY || process.env.LABEL_RENDERER_API_KEY,
     cookieSecure: process.env.COOKIE_SECURE === "true",
+    trustProxyHops: Number(process.env.TRUST_PROXY_HOPS || 0),
     staticDir: path.resolve(currentDir, "../dist"),
 });
 app.listen(port, "0.0.0.0", () => {

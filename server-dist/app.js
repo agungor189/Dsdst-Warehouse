@@ -1,6 +1,7 @@
 import express from "express";
 import helmet from "helmet";
 import path from "node:path";
+import { createLoginRateLimit } from "./loginRateLimit.js";
 const SESSION_COOKIE = "warehouse_session";
 const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 const sensitiveFieldNames = new Set([
@@ -93,6 +94,9 @@ export function createWarehouseApp(config) {
         secure: config.cookieSecure ?? false,
         path: "/",
     };
+    if (Number.isInteger(config.trustProxyHops) && Number(config.trustProxyHops) > 0) {
+        app.set("trust proxy", Number(config.trustProxyHops));
+    }
     app.disable("x-powered-by");
     app.use(helmet({ contentSecurityPolicy: false }));
     app.use(express.json({ limit: "2mb", strict: true }));
@@ -101,6 +105,7 @@ export function createWarehouseApp(config) {
         next();
     });
     app.get("/health", (_req, res) => res.json({ status: "ok" }));
+    const loginRateLimit = createLoginRateLimit(config.loginRateLimit);
     const fetchLabelPrinter = async (res, pathName, init = {}) => {
         if (labelConfigError(config)) {
             res.status(503).json({ success: false, error: { code: "LABEL_PRINTER_NOT_CONFIGURED", message: "Label Printer bağlantısı sunucuda yapılandırılmamış." } });
@@ -195,7 +200,7 @@ export function createWarehouseApp(config) {
         res.locals.sessionToken = token;
         next();
     };
-    app.post("/api/auth/login", async (req, res) => {
+    app.post("/api/auth/login", loginRateLimit, async (req, res) => {
         if (configurationFailure(res))
             return;
         const username = typeof req.body?.username === "string" ? req.body.username.trim().slice(0, 254) : "";

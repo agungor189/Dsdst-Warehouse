@@ -6,10 +6,25 @@ services:
     environment:
       PANEL_API_BASE_URL: ${PANEL_API_BASE_URL}
       WAREHOUSE_API_KEY: ${WAREHOUSE_API_KEY}
-      LABEL_PRINTER_URL: ${LABEL_PRINTER_URL:-http://host.docker.internal:3010}
-      LABEL_PRINTER_API_KEY: ${LABEL_PRINTER_API_KEY:-}
+      LABEL_RENDERER_URL: ${LABEL_RENDERER_URL:-http://warehouse-label-renderer:3010}
+      LABEL_RENDERER_API_KEY: ${LABEL_RENDERER_API_KEY:?LABEL_RENDERER_API_KEY is required}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
       PORT: 3006
     ports:
       - "3006:3006"
     restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    networks:
+      - dsdst-internal
+
+networks:
+  dsdst-internal:
+    name: dsdst-internal
+    external: true
