@@ -248,6 +248,19 @@ describe("Warehouse BFF", () => {
     });
   });
 
+  it("fiziksel depo planını Panel Warehouse sözleşmesine iletir", async () => {
+    let received: { path?: string; body?: unknown } = {};
+    const layout = { warehouseConfig: { name: "E2E" }, objects: [{ id: "rack-z9", type: "rack", rackCode: "Z9" }] };
+    const panelUrl = await startPanel((req, res) => {
+      received = { path: req.path, body: req.body };
+      res.status(201).json({ success: true, data: { id: "layout-1" } });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .post("/api/admin/layouts/import-legacy").set("Cookie", sessionCookie).send(layout);
+    expect(response.status).toBe(201);
+    expect(received).toEqual({ path: "/api/warehouse/v1/admin/layouts/import-legacy", body: layout });
+  });
+
   it("Mal Kabul planlı rafını paket kimliğiyle sabit upstream rotasından alır", async () => {
     let receivedPath = "";
     const panelUrl = await startPanel((req, res) => {
@@ -337,6 +350,8 @@ describe("Warehouse BFF", () => {
     let receivedBody: unknown;
     const labelUrl = await startPanel((req, res) => {
       receivedBody = req.body;
+      res.set("X-Label-Template-Id", "location-live-v2");
+      res.set("X-Label-Template-Purpose", "location");
       res.type("application/pdf").send(Buffer.from("%PDF-preview"));
     });
     const response = await request(createWarehouseApp({ labelPrinterBaseUrl: labelUrl }))
@@ -344,6 +359,8 @@ describe("Warehouse BFF", () => {
       .send({ purpose: "location", data: { Lokasyon: "A1-K1-P1" }, unsafe: true });
     expect(response.status).toBe(200);
     expect(response.headers["content-type"]).toContain("application/pdf");
+    expect(response.headers["x-label-template-id"]).toBe("location-live-v2");
+    expect(response.headers["x-label-template-purpose"]).toBe("location");
     expect(receivedBody).toEqual({ purpose: "location", data: { Lokasyon: "A1-K1-P1" } });
   });
 

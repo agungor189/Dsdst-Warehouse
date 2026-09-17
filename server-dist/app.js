@@ -294,6 +294,11 @@ export function createWarehouseApp(config) {
         if (!upstream)
             return;
         const contentType = upstream.headers.get("content-type") || "application/octet-stream";
+        for (const header of ["x-label-template-id", "x-label-template-purpose"]) {
+            const value = upstream.headers.get(header);
+            if (value)
+                res.setHeader(header, value);
+        }
         return res.status(upstream.status).type(contentType).send(Buffer.from(await upstream.arrayBuffer()));
     });
     const forward = async (req, res, method, upstreamPath, query, body, binary = false) => {
@@ -447,6 +452,7 @@ export function createWarehouseApp(config) {
     }));
     app.get("/api/admin/warehouse-map", requireSession, (req, res) => forward(req, res, "GET", "/admin/warehouse-map"));
     app.get("/api/admin/layouts/placement", requireSession, (req, res) => forward(req, res, "GET", "/admin/layouts/placement"));
+    app.post("/api/admin/layouts/import-legacy", requireSession, (req, res) => forward(req, res, "POST", "/admin/layouts/import-legacy", undefined, safeAdminBody(req.body)));
     app.post("/api/admin/layouts/placement/preview", requireSession, (req, res) => forward(req, res, "POST", "/admin/layouts/placement/preview", undefined, {
         source_filename: safeQueryText(req.body?.source_filename, 255),
         csv_text: safeQueryText(req.body?.csv_text, 2 * 1024 * 1024),
