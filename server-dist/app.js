@@ -211,10 +211,10 @@ export function createWarehouseApp(config) {
                 error: { code: "VALIDATION_ERROR", message: "Kullanıcı adı/e-posta ve şifre zorunludur." },
             });
         }
-        const target = new URL(`${config.panelApiBaseUrl.replace(/\/$/, "")}/api/auth/login`);
+        const target = new URL(`${config.panelApiBaseUrl.replace(/\/$/, "")}/api/auth/service/login`);
         const upstream = await fetchPanel(res, target, {
             method: "POST",
-            headers: { Accept: "application/json", "Content-Type": "application/json" },
+            headers: { Accept: "application/json", "Content-Type": "application/json", "x-api-key": config.warehouseApiKey },
             body: JSON.stringify({ username, password }),
         });
         if (!upstream)
@@ -246,10 +246,10 @@ export function createWarehouseApp(config) {
         if (configurationFailure(res))
             return;
         const token = String(res.locals.sessionToken);
-        const target = new URL(`${config.panelApiBaseUrl.replace(/\/$/, "")}/api/auth/me`);
+        const target = new URL(`${config.panelApiBaseUrl.replace(/\/$/, "")}/api/auth/service/me`);
         const upstream = await fetchPanel(res, target, {
             method: "GET",
-            headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+            headers: { Accept: "application/json", Authorization: `Bearer ${token}`, "x-api-key": config.warehouseApiKey },
         });
         if (!upstream)
             return;
@@ -262,9 +262,24 @@ export function createWarehouseApp(config) {
         }
         return res.json({ success: true, data: safeResponse(body.user, token) });
     });
-    app.post("/api/auth/logout", (_req, res) => {
+    app.post("/api/auth/logout", requireSession, async (_req, res) => {
+        if (configurationFailure(res))
+            return;
+        const token = String(res.locals.sessionToken);
+        const target = new URL(`${config.panelApiBaseUrl.replace(/\/$/, "")}/api/auth/service/logout`);
+        const upstream = await fetchPanel(res, target, {
+            method: "POST",
+            headers: { Accept: "application/json", Authorization: `Bearer ${token}`, "x-api-key": config.warehouseApiKey },
+        });
+        if (!upstream)
+            return;
+        const body = await readJson(upstream, res);
+        if (body === null)
+            return;
+        if (!upstream.ok && upstream.status !== 401)
+            return res.status(upstream.status).json(safeResponse(body, token));
         res.clearCookie(SESSION_COOKIE, cookieOptions);
-        res.json({ success: true, data: null });
+        return res.json({ success: true, data: null });
     });
     app.get("/api/labels/templates", requireSession, async (req, res) => {
         const purpose = safeQueryText(req.query.purpose, 40);

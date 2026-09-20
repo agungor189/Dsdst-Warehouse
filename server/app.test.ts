@@ -140,7 +140,8 @@ describe("Warehouse BFF", () => {
 
   it("panel giriş tokenını HttpOnly cookie yapar ve response içinde göstermez", async () => {
     const panelUrl = await startPanel((req, res) => {
-      expect(req.path).toBe("/api/auth/login");
+      expect(req.path).toBe("/api/auth/service/login");
+      expect(req.header("x-api-key")).toBe(SECRET);
       res.json({ success: true, token: SESSION, user: { id: "user-1", username: "Alper", role: "admin", must_change_password: false } });
     });
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
@@ -395,10 +396,16 @@ describe("Warehouse BFF", () => {
     expect(receivedBody).toEqual({ note: "Kırılabilir" });
   });
 
-  it("logout oturum cookie'sini temizler", async () => {
-    const response = await request(createWarehouseApp({ panelApiBaseUrl: "http://panel.test", warehouseApiKey: SECRET }))
+  it("logout Panel session'ını human + service identity ile revoke eder ve sonra cookie'yi temizler", async () => {
+    let received: { path?: string; token?: string; key?: string } = {};
+    const panelUrl = await startPanel((req, res) => {
+      received = { path: req.path, token: req.header("authorization"), key: req.header("x-api-key") };
+      res.json({ success: true });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
       .post("/api/auth/logout").set("Cookie", sessionCookie);
     expect(response.status).toBe(200);
     expect(response.headers["set-cookie"]?.[0]).toMatch(/warehouse_session=;/);
+    expect(received).toEqual({ path: "/api/auth/service/logout", token: `Bearer ${SESSION}`, key: SECRET });
   });
 });
