@@ -340,7 +340,13 @@ describe("Warehouse BFF", () => {
       received = { path: req.path, query: req.query, key: req.header("x-api-key") };
       res.json({ templates: [{ id: "receipt-v2", purpose: "goods_receipt" }] });
     });
-    const response = await request(createWarehouseApp({ labelPrinterBaseUrl: labelUrl, labelPrinterApiKey: "label-secret" }))
+    const panelUrl = await startPanel((req, res) => {
+      expect(req.path).toBe("/api/auth/service/me");
+      expect(req.header("authorization")).toBe(`Bearer ${SESSION}`);
+      expect(req.header("x-api-key")).toBe(SECRET);
+      res.json({ success: true, user: { id: "user-1", role: "user", permissions: { "warehouse:print_labels": true } } });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET, labelPrinterBaseUrl: labelUrl, labelPrinterApiKey: "label-secret" }))
       .get("/api/labels/templates?purpose=goods_receipt").set("Cookie", sessionCookie);
     expect(response.status).toBe(200);
     expect(response.body.data[0].id).toBe("receipt-v2");
@@ -355,7 +361,8 @@ describe("Warehouse BFF", () => {
       res.set("X-Label-Template-Purpose", "location");
       res.type("application/pdf").send(Buffer.from("%PDF-preview"));
     });
-    const response = await request(createWarehouseApp({ labelPrinterBaseUrl: labelUrl }))
+    const panelUrl = await startPanel((_req, res) => res.json({ success: true, user: { id: "user-1", role: "admin", permissions: {} } }));
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET, labelPrinterBaseUrl: labelUrl }))
       .post("/api/labels/preview").set("Cookie", sessionCookie)
       .send({ purpose: "location", data: { Lokasyon: "A1-K1-P1" }, unsafe: true });
     expect(response.status).toBe(200);
@@ -363,6 +370,32 @@ describe("Warehouse BFF", () => {
     expect(response.headers["x-label-template-id"]).toBe("location-live-v2");
     expect(response.headers["x-label-template-purpose"]).toBe("location");
     expect(receivedBody).toEqual({ purpose: "location", data: { Lokasyon: "A1-K1-P1" } });
+  });
+
+  it.each([
+    [undefined, "missing"],
+    [`${SESSION}-fake`, "fake"],
+    [`${SESSION}-revoked`, "revoked"],
+  ])("Label proxy %s human session için 401 döner", async (token) => {
+    const labelRequest = vi.fn((_req, res) => res.json({ templates: [] }));
+    const labelUrl = await startPanel(labelRequest);
+    const panelUrl = await startPanel((_req, res) => res.status(401).json({ success: false, error: { code: "UNAUTHORIZED" } }));
+    const call = request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET, labelPrinterBaseUrl: labelUrl }))
+      .get("/api/labels/templates");
+    if (token) call.set("Cookie", `warehouse_session=${token}`);
+    const response = await call;
+    expect(response.status).toBe(401);
+    expect(labelRequest).not.toHaveBeenCalled();
+  });
+
+  it("Label proxy service key tek başına veya eksik human capability ile çalışmaz", async () => {
+    const labelRequest = vi.fn((_req, res) => res.json({ templates: [] }));
+    const labelUrl = await startPanel(labelRequest);
+    const panelUrl = await startPanel((_req, res) => res.json({ success: true, user: { id: "user-1", role: "user", permissions: {} } }));
+    const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET, labelPrinterBaseUrl: labelUrl });
+    expect((await request(app).get("/api/labels/templates").set("x-api-key", SECRET)).status).toBe(401);
+    expect((await request(app).get("/api/labels/templates").set("Cookie", sessionCookie)).status).toBe(403);
+    expect(labelRequest).not.toHaveBeenCalled();
   });
 
   it("paket ve lokasyon baskısında purpose değerini istemciden bağımsız sabitler", async () => {

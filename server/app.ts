@@ -218,6 +218,33 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     next();
   };
 
+  const requireLivePanelCapability = (capability: "warehouse:print_labels") => async (_req: Request, res: ExpressResponse, next: NextFunction) => {
+    if (configurationFailure(res)) return;
+    const token = String(res.locals.sessionToken || "");
+    if (!token) return res.status(401).json({ success: false, error: { code: "SESSION_REQUIRED", message: "Oturum açmanız gerekiyor." } });
+    const target = new URL(`${config.panelApiBaseUrl!.replace(/\/$/, "")}/api/auth/service/me`);
+    const upstream = await fetchPanel(res, target, {
+      method: "GET",
+      headers: { Accept: "application/json", Authorization: `Bearer ${token}`, "x-api-key": config.warehouseApiKey! },
+    });
+    if (!upstream) return;
+    const body = await readJson(upstream, res);
+    if (body === null) return;
+    if (!upstream.ok) {
+      res.clearCookie(SESSION_COOKIE, cookieOptions);
+      if (upstream.status >= 500) return res.status(502).json({ success: false, error: { code: "PANEL_AUTH_UNAVAILABLE", message: "Panel kimlik doğrulaması kullanılamıyor." } });
+      return res.status(401).json({ success: false, error: { code: "SESSION_INVALID", message: "Oturum geçersiz veya iptal edilmiş." } });
+    }
+    const user = (body as { user?: { role?: unknown; permissions?: unknown } }).user;
+    const permissions = user?.permissions && typeof user.permissions === "object" && !Array.isArray(user.permissions)
+      ? user.permissions as Record<string, unknown>
+      : {};
+    const allowed = user?.role === "admin" || permissions[capability] === true;
+    if (!allowed) return res.status(403).json({ success: false, error: { code: "FORBIDDEN", message: `Bu işlem için ${capability} capability gerekli.` } });
+    res.locals.panelUser = user;
+    return next();
+  };
+
   app.post("/api/auth/login", loginRateLimit, async (req, res) => {
     if (configurationFailure(res)) return;
     const username = typeof req.body?.username === "string" ? req.body.username.trim().slice(0, 254) : "";
@@ -293,7 +320,7 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     return res.json({ success: true, data: null });
   });
 
-  app.get("/api/labels/templates", requireSession, async (req, res) => {
+  app.get("/api/labels/templates", requireSession, requireLivePanelCapability("warehouse:print_labels"), async (req, res) => {
     const purpose = safeQueryText(req.query.purpose, 40);
     const query = purpose ? `?purpose=${encodeURIComponent(purpose)}` : "";
     const upstream = await fetchLabelPrinter(res, `/api/v1/templates${query}`, { headers: { Accept: "application/json" } });
@@ -308,7 +335,7 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     }
   });
 
-  app.post("/api/labels/preview", requireSession, async (req, res) => {
+  app.post("/api/labels/preview", requireSession, requireLivePanelCapability("warehouse:print_labels"), async (req, res) => {
     const purpose = safeQueryText(req.body?.purpose, 40);
     const data = req.body?.data && typeof req.body.data === "object" && !Array.isArray(req.body.data) ? req.body.data : {};
     const upstream = await fetchLabelPrinter(res, "/api/v1/render", {
