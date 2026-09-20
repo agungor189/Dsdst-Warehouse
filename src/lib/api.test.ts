@@ -31,6 +31,12 @@ describe("Warehouse API client", () => {
     }));
   });
 
+  it("continuous-cut complementary metadata ve base UOM'u değiştirmeden tüketir", async () => {
+    vi.mocked(fetch).mockImplementation(() => response({ success: true, contract: "dsdst.catalog-product.v1", data: [{ id: "fabric-1", sku: "FABRIC-1", title: "Kumaş", catalog_type: "complementary", base_uom: { code: "square_meter", base_quantum: "square_millimeter", quantity_scale: 1_000_000 }, catalog_version: 1, catalog_version_ref: "catalog-product:fabric-1:v1", uom_registry_version: "uom-registry:v1", dimensions: { length_mm: null, width_mm: null, height_mm: null, diameter_mm: null }, mass_grams: null, material_behavior: "continuous_cut", profile: null }] }));
+    const products = await catalogApi.listProducts("complementary");
+    expect(products[0]).toMatchObject({ material_behavior: "continuous_cut", base_uom: { code: "square_meter" } });
+  });
+
   it("verify-pick body içinde yalnız ürün ve kodu gönderir", async () => {
     vi.mocked(fetch).mockImplementation(() => response({ success: true, data: { product_id: "product-1", match_type: "location", verified: true } }));
     await warehouseApi.verifyPick("order-1", "product-1", "A1-K2-P3");

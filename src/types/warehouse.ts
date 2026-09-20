@@ -493,6 +493,7 @@ export interface CatalogProductV1 {
   uom_registry_version: string;
   dimensions: { length_mm: number | null; width_mm: number | null; height_mm: number | null; diameter_mm: number | null };
   mass_grams: number | null;
+  material_behavior: "continuous_cut" | null;
   profile: null | {
     material: string;
     form: string;
