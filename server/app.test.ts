@@ -3,12 +3,17 @@ import express, { type RequestHandler } from "express";
 import type { Server } from "node:http";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createWarehouseApp } from "./app.js";
+import { createWarehouseApp as createWarehouseAppImplementation, type WarehouseBffConfig } from "./app.js";
 
 const SECRET = "warehouse-secret-that-must-never-leak";
 const SESSION = "test-panel-jwt";
 const sessionCookie = `warehouse_session=${SESSION}`;
+const TRUSTED_ORIGIN = "https://warehouse.example";
 const servers: Server[] = [];
+const createWarehouseApp = (config: WarehouseBffConfig) => createWarehouseAppImplementation({
+  ...config,
+  allowedOrigins: config.allowedOrigins ?? [TRUSTED_ORIGIN],
+});
 
 const startPanel = async (handler: RequestHandler) => {
   const panel = express();
@@ -138,6 +143,37 @@ describe("Warehouse BFF", () => {
     expect(panelRequest).not.toHaveBeenCalled();
   });
 
+  it("cookie-auth unsafe isteklerde eksik, cross-origin ve same-site farklı origin'i reddeder", async () => {
+    const panelRequest = vi.fn((_req, res) => res.json({ success: true, data: { id: "order-1" } }));
+    const panelUrl = await startPanel(panelRequest);
+    const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET, trustProxyHops: 1, allowedOrigins: [] });
+    const unsafe = () => request(app).post("/api/orders/order-1/start")
+      .set("Cookie", sessionCookie)
+      .set("Host", "warehouse.example")
+      .set("X-Forwarded-Proto", "https")
+      .send({});
+
+    const missing = await unsafe();
+    expect(missing.status).toBe(403);
+    expect(missing.body.error.code).toBe("CSRF_FORBIDDEN");
+
+    const crossOrigin = await unsafe().set("Origin", "https://attacker.example");
+    expect(crossOrigin.status).toBe(403);
+    expect(crossOrigin.body.error.code).toBe("CSRF_FORBIDDEN");
+
+    const invalidOrigin = await unsafe().set("Origin", "null");
+    expect(invalidOrigin.status).toBe(403);
+    expect(invalidOrigin.body.error.code).toBe("CSRF_FORBIDDEN");
+
+    const sameSiteDifferentOrigin = await unsafe().set("Origin", "https://warehouse.example:444");
+    expect(sameSiteDifferentOrigin.status).toBe(403);
+    expect(sameSiteDifferentOrigin.body.error.code).toBe("CSRF_FORBIDDEN");
+
+    const trusted = await unsafe().set("Origin", "https://warehouse.example");
+    expect(trusted.status).toBe(200);
+    expect(panelRequest).toHaveBeenCalledTimes(1);
+  });
+
   it("panel giriş tokenını HttpOnly cookie yapar ve response içinde göstermez", async () => {
     const panelUrl = await startPanel((req, res) => {
       expect(req.path).toBe("/api/auth/service/login");
@@ -192,6 +228,7 @@ describe("Warehouse BFF", () => {
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
       .post("/api/orders/o1/verify-pick")
       .set("Cookie", sessionCookie)
+      .set("Origin", TRUSTED_ORIGIN)
       .send({ product_id: "p1", code: "SKU-1", admin: true });
     expect(response.status).toBe(200);
     expect(receivedBody).toEqual({ product_id: "p1", code: "SKU-1" });
@@ -206,6 +243,7 @@ describe("Warehouse BFF", () => {
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
       .post("/api/admin/packages/claim-next")
       .set("Cookie", sessionCookie)
+      .set("Origin", TRUSTED_ORIGIN)
       .send({ supplier_code: " SUP-1 ", role: "admin", x_api_key: "leak" });
     expect(response.status).toBe(200);
     expect(received).toEqual({
@@ -225,6 +263,7 @@ describe("Warehouse BFF", () => {
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
       .post("/api/admin/receiving/sessions")
       .set("Cookie", sessionCookie)
+      .set("Origin", TRUSTED_ORIGIN)
       .send({ lot_number: " LOT-1 ", device_id: " phone-1 ", supplier_code: "leak", role: "admin" });
     expect(response.status).toBe(200);
     expect(received).toEqual({
@@ -240,7 +279,7 @@ describe("Warehouse BFF", () => {
       res.json({ success: true, data: { valid: true, preview_hash: "hash" } });
     });
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
-      .post("/api/admin/layouts/placement/preview").set("Cookie", sessionCookie)
+      .post("/api/admin/layouts/placement/preview").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
       .send({ source_filename: " layout.csv ", csv_text: "sku,pick_face_location\nSKU-1,A1-K1-P1", active: true, created_by: "attacker" });
     expect(response.status).toBe(200);
     expect(received).toEqual({
@@ -257,7 +296,7 @@ describe("Warehouse BFF", () => {
       res.status(201).json({ success: true, data: { id: "layout-1" } });
     });
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
-      .post("/api/admin/layouts/import-legacy").set("Cookie", sessionCookie).send(layout);
+      .post("/api/admin/layouts/import-legacy").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN).send(layout);
     expect(response.status).toBe(201);
     expect(received).toEqual({ path: "/api/warehouse/v1/admin/layouts/import-legacy", body: layout });
   });
@@ -293,7 +332,7 @@ describe("Warehouse BFF", () => {
     let received: { path?: string; body?: unknown } = {};
     const panelUrl = await startPanel((req, res) => { received = { path: req.path, body: req.body }; res.json({ success: true, data: {} }); });
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
-      .post("/api/admin/packages/package-1/release-receiving").set("Cookie", sessionCookie)
+      .post("/api/admin/packages/package-1/release-receiving").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
       .send({ device_id: " phone-1 ", user_id: "other-user", status: "EXPECTED" });
     expect(response.status).toBe(200);
     expect(received).toEqual({
@@ -363,7 +402,7 @@ describe("Warehouse BFF", () => {
     });
     const panelUrl = await startPanel((_req, res) => res.json({ success: true, user: { id: "user-1", role: "admin", permissions: {} } }));
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET, labelPrinterBaseUrl: labelUrl }))
-      .post("/api/labels/preview").set("Cookie", sessionCookie)
+      .post("/api/labels/preview").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
       .send({ purpose: "location", data: { Lokasyon: "A1-K1-P1" }, unsafe: true });
     expect(response.status).toBe(200);
     expect(response.headers["content-type"]).toContain("application/pdf");
@@ -405,9 +444,9 @@ describe("Warehouse BFF", () => {
       res.json({ success: true, data: { job: { id: "job-1" } } });
     });
     const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET });
-    await request(app).post("/api/admin/packages/pkg-1/print").set("Cookie", sessionCookie)
+    await request(app).post("/api/admin/packages/pkg-1/print").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
       .send({ idempotency_key: "p-1", template_purpose: "shipping" });
-    await request(app).post("/api/admin/locations/loc-1/print").set("Cookie", sessionCookie)
+    await request(app).post("/api/admin/locations/loc-1/print").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
       .send({ idempotency_key: "l-1", template_purpose: "custom" });
     expect(received).toEqual([
       { path: "/api/warehouse/v1/admin/packages/pkg-1/print", body: { idempotency_key: "p-1", template_purpose: "goods_receipt" } },
@@ -424,6 +463,7 @@ describe("Warehouse BFF", () => {
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
       .post("/api/orders/order-1/complete")
       .set("Cookie", sessionCookie)
+      .set("Origin", TRUSTED_ORIGIN)
       .send({ note: "  Kırılabilir  ", role: "admin" });
     expect(response.status).toBe(200);
     expect(receivedBody).toEqual({ note: "Kırılabilir" });
@@ -436,7 +476,7 @@ describe("Warehouse BFF", () => {
       res.json({ success: true });
     });
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
-      .post("/api/auth/logout").set("Cookie", sessionCookie);
+      .post("/api/auth/logout").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN);
     expect(response.status).toBe(200);
     expect(response.headers["set-cookie"]?.[0]).toMatch(/warehouse_session=;/);
     expect(received).toEqual({ path: "/api/auth/service/logout", token: `Bearer ${SESSION}`, key: SECRET });

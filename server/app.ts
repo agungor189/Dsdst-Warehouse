@@ -14,6 +14,7 @@ export interface WarehouseBffConfig {
   logger?: Pick<Console, "error">;
   loginRateLimit?: LoginRateLimitOptions;
   trustProxyHops?: number;
+  allowedOrigins?: string[];
 }
 
 type ProxyMethod = "GET" | "POST";
@@ -106,8 +107,12 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     secure: config.cookieSecure ?? false,
     path: "/",
   };
+  const allowedOrigins = new Set((config.allowedOrigins || []).flatMap((value) => {
+    try { return [new URL(value).origin]; } catch { return []; }
+  }));
+  const trustProxy = Number.isInteger(config.trustProxyHops) && Number(config.trustProxyHops) > 0;
 
-  if (Number.isInteger(config.trustProxyHops) && Number(config.trustProxyHops) > 0) {
+  if (trustProxy) {
     app.set("trust proxy", Number(config.trustProxyHops));
   }
 
@@ -206,6 +211,24 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     [config.warehouseApiKey || "", sessionToken],
   ));
 
+  const requireTrustedOrigin = (req: Request, res: ExpressResponse) => {
+    if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return true;
+    const origin = req.headers.origin;
+    if (!origin) {
+      res.status(403).json({ success: false, error: { code: "CSRF_FORBIDDEN", message: "Unsafe istek için Origin header zorunludur." } });
+      return false;
+    }
+    const forwardedHost = trustProxy ? String(req.headers["x-forwarded-host"] || "").split(",", 1)[0].trim() : "";
+    const host = forwardedHost || req.get("host");
+    let effectiveOrigin = "";
+    try { effectiveOrigin = host ? new URL(`${req.protocol}://${host}`).origin : ""; } catch {}
+    if (origin !== effectiveOrigin && !allowedOrigins.has(origin)) {
+      res.status(403).json({ success: false, error: { code: "CSRF_FORBIDDEN", message: "Origin izinli değil." } });
+      return false;
+    }
+    return true;
+  };
+
   const requireSession = (req: Request, res: ExpressResponse, next: NextFunction) => {
     const token = readCookie(req, SESSION_COOKIE);
     if (!token) {
@@ -214,6 +237,7 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
         error: { code: "SESSION_REQUIRED", message: "Oturum açmanız gerekiyor." },
       });
     }
+    if (!requireTrustedOrigin(req, res)) return;
     res.locals.sessionToken = token;
     next();
   };

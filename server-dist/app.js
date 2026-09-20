@@ -94,7 +94,16 @@ export function createWarehouseApp(config) {
         secure: config.cookieSecure ?? false,
         path: "/",
     };
-    if (Number.isInteger(config.trustProxyHops) && Number(config.trustProxyHops) > 0) {
+    const allowedOrigins = new Set((config.allowedOrigins || []).flatMap((value) => {
+        try {
+            return [new URL(value).origin];
+        }
+        catch {
+            return [];
+        }
+    }));
+    const trustProxy = Number.isInteger(config.trustProxyHops) && Number(config.trustProxyHops) > 0;
+    if (trustProxy) {
         app.set("trust proxy", Number(config.trustProxyHops));
     }
     app.disable("x-powered-by");
@@ -189,6 +198,27 @@ export function createWarehouseApp(config) {
         }
     };
     const safeResponse = (body, sessionToken = "") => rewritePanelPaths(redactSensitive(body, [config.warehouseApiKey || "", sessionToken]));
+    const requireTrustedOrigin = (req, res) => {
+        if (["GET", "HEAD", "OPTIONS"].includes(req.method))
+            return true;
+        const origin = req.headers.origin;
+        if (!origin) {
+            res.status(403).json({ success: false, error: { code: "CSRF_FORBIDDEN", message: "Unsafe istek için Origin header zorunludur." } });
+            return false;
+        }
+        const forwardedHost = trustProxy ? String(req.headers["x-forwarded-host"] || "").split(",", 1)[0].trim() : "";
+        const host = forwardedHost || req.get("host");
+        let effectiveOrigin = "";
+        try {
+            effectiveOrigin = host ? new URL(`${req.protocol}://${host}`).origin : "";
+        }
+        catch { }
+        if (origin !== effectiveOrigin && !allowedOrigins.has(origin)) {
+            res.status(403).json({ success: false, error: { code: "CSRF_FORBIDDEN", message: "Origin izinli değil." } });
+            return false;
+        }
+        return true;
+    };
     const requireSession = (req, res, next) => {
         const token = readCookie(req, SESSION_COOKIE);
         if (!token) {
@@ -197,6 +227,8 @@ export function createWarehouseApp(config) {
                 error: { code: "SESSION_REQUIRED", message: "Oturum açmanız gerekiyor." },
             });
         }
+        if (!requireTrustedOrigin(req, res))
+            return;
         res.locals.sessionToken = token;
         next();
     };
