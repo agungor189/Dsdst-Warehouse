@@ -9,6 +9,7 @@ export interface AuthUser {
 }
 
 export type WarehousePermission =
+  | "warehouse:pick_orders"
   | "warehouse:receive"
   | "warehouse:manage_receiving_sessions"
   | "warehouse:print_labels"

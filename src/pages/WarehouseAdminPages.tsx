@@ -10,6 +10,7 @@ import { locationLabelData, openPdfBlob, packageLabelData } from "../lib/labels"
 import type { ReceivingPlacedPackage, ReceivingSession, WarehouseLocation, WarehousePackage, WarehousePermission } from "../types/warehouse";
 
 const permissionLabels: Record<WarehousePermission, string> = {
+  "warehouse:pick_orders": "Sipariş Toplama",
   "warehouse:receive": "Mal Kabul",
   "warehouse:manage_receiving_sessions": "Mal Kabul Oturumu Yönetimi",
   "warehouse:print_labels": "Etiketleme",
