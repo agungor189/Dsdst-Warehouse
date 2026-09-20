@@ -56,6 +56,21 @@ describe("Warehouse BFF", () => {
     });
   });
 
+  it("versioned catalog contract'ını salt-okunur olarak Panel'e iletir", async () => {
+    const received: { path?: string; authorization?: string; key?: string } = {};
+    const panelUrl = await startPanel((req, res) => {
+      received.path = req.path;
+      received.authorization = req.header("authorization");
+      received.key = req.header("x-api-key");
+      res.json({ success: true, contract: "dsdst.catalog-product.v1", data: [{ id: "p-1", sku: "SKU-1", base_uom: { code: "piece" }, catalog_version_ref: "catalog-product:p-1:v1" }] });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .get("/api/catalog/v1/products?catalog_type=connector").set("Cookie", sessionCookie);
+    expect(response.status).toBe(200);
+    expect(response.body.contract).toBe("dsdst.catalog-product.v1");
+    expect(received).toEqual({ path: "/api/warehouse/v1/catalog/products", authorization: `Bearer ${SESSION}`, key: SECRET });
+  });
+
   it("eksik server API key için gizli bilgi içermeyen 503 döner", async () => {
     const response = await request(createWarehouseApp({ panelApiBaseUrl: "http://panel.test" }))
       .get("/api/orders").set("Cookie", sessionCookie);

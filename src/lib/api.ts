@@ -18,6 +18,8 @@ import type {
   WarehousePackageListItem,
   WarehousePlacementLayout,
   WarehousePlacementPreview,
+  CatalogProductV1,
+  CatalogUomRegistryV1,
 } from "../types/warehouse";
 import type { ReceivingLot, ReceivingSession } from "../types/warehouse";
 
@@ -164,6 +166,16 @@ export const warehouseApi = {
   },
   async getPickHistory(id: string) {
     return (await request<PickSessionDetail>(`/pick-history/${encodeURIComponent(id)}`)).data;
+  },
+};
+
+export const catalogApi = {
+  async listProducts(catalogType?: CatalogProductV1["catalog_type"]) {
+    const query = catalogType ? `?catalog_type=${encodeURIComponent(catalogType)}` : "";
+    return (await request<CatalogProductV1[]>(`/catalog/v1/products${query}`)).data;
+  },
+  async getUoms() {
+    return (await request<CatalogUomRegistryV1>("/catalog/v1/uoms")).data;
   },
 };
 

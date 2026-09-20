@@ -420,6 +420,14 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     });
     return forward(req, res, "GET", "/orders", query);
   });
+  app.get("/api/catalog/v1/products", requireSession, (req, res) => {
+    const query = new URLSearchParams();
+    const catalogType = safeQueryText(req.query.catalog_type, 20);
+    if (catalogType) query.set("catalog_type", catalogType);
+    return forward(req, res, "GET", "/catalog/products", query);
+  });
+  app.get("/api/catalog/v1/uoms", requireSession, (req, res) =>
+    forward(req, res, "GET", "/catalog/uoms"));
   app.get("/api/orders/:id", requireSession, (req, res) =>
     forward(req, res, "GET", `/orders/${encodeURIComponent(String(req.params.id))}`));
   app.get("/api/orders/:id/pick-plan", requireSession, (req, res) =>

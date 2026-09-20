@@ -480,3 +480,32 @@ export interface PickHistoryFilters {
   order_number?: string;
   status?: PickSessionStatus;
 }
+export type CatalogUomCode = "piece" | "meter" | "square_meter" | "kg" | "roll" | "package" | "box" | "millimeter" | "centimeter" | "gram";
+
+export interface CatalogProductV1 {
+  id: string;
+  sku: string;
+  title: string;
+  catalog_type: "product" | "profile" | "connector" | "cap" | "wheel";
+  base_uom: { code: CatalogUomCode; base_quantum: string; quantity_scale: number };
+  catalog_version: number;
+  catalog_version_ref: string;
+  uom_registry_version: string;
+  dimensions: { length_mm: number | null; width_mm: number | null; height_mm: number | null; diameter_mm: number | null };
+  mass_grams: number | null;
+  profile: null | {
+    material: string;
+    form: string;
+    width_mm: number | null;
+    height_mm: number | null;
+    diameter_mm: number | null;
+    wall_thickness_mm: number;
+    standard_purchase_lengths_mm: number[];
+    custom_length_allowed: boolean;
+  };
+}
+
+export interface CatalogUomRegistryV1 {
+  registry_version: string;
+  units: Array<{ code: CatalogUomCode; dimension: string; base_quantum: string; quantity_scale: number; registry_version: string }>;
+}
