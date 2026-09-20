@@ -486,7 +486,7 @@ export interface CatalogProductV1 {
   id: string;
   sku: string;
   title: string;
-  catalog_type: "product" | "profile" | "connector" | "cap" | "wheel";
+  catalog_type: "product" | "profile" | "connector" | "cap" | "wheel" | "complementary";
   base_uom: { code: CatalogUomCode; base_quantum: string; quantity_scale: number };
   catalog_version: number;
   catalog_version_ref: string;
@@ -496,10 +496,14 @@ export interface CatalogProductV1 {
   profile: null | {
     material: string;
     form: string;
-    width_mm: number | null;
-    height_mm: number | null;
-    diameter_mm: number | null;
-    wall_thickness_mm: number;
+    width_mm: string | null;
+    height_mm: string | null;
+    diameter_mm: string | null;
+    wall_thickness_mm: string;
+    width_micrometers: number | null;
+    height_micrometers: number | null;
+    diameter_micrometers: number | null;
+    wall_thickness_micrometers: number;
     standard_purchase_lengths_mm: number[];
     custom_length_allowed: boolean;
   };
