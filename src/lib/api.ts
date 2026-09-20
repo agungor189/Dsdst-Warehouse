@@ -23,6 +23,8 @@ import type {
   InventoryAvailabilityV1,
   InventoryFulfillmentV1,
   InventoryReservationV1,
+  WarehouseExecutionPackage,
+  WarehouseExecutionLocation,
 } from "../types/warehouse";
 import type { ReceivingLot, ReceivingSession } from "../types/warehouse";
 
@@ -243,6 +245,60 @@ const warehouseDeviceId = () => {
   const created = crypto.randomUUID();
   sessionStorage.setItem(key, created);
   return created;
+};
+
+const executionOperation = () => crypto.randomUUID();
+
+export const warehouseExecutionApi = {
+  async getPackage(packageIdOrCode: string) {
+    return (await request<WarehouseExecutionPackage>(`/execution/packages/${encodeURIComponent(packageIdOrCode)}`)).data;
+  },
+  async suggestLocation(packageIdOrCode: string) {
+    return (await request<WarehouseExecutionLocation>(`/execution/packages/${encodeURIComponent(packageIdOrCode)}/suggestion`)).data;
+  },
+  async identifyPackage(packageIdOrCode: string, labelIdentity: string, operationId = executionOperation()) {
+    return (await request<WarehouseExecutionPackage>(`/execution/packages/${encodeURIComponent(packageIdOrCode)}/identity`, {
+      method: "POST", body: JSON.stringify({ labelIdentity, idempotency_key: operationId }),
+    })).data;
+  },
+  async placePackage(packageIdOrCode: string, destinationCode: string, operationId = executionOperation()) {
+    return (await request<{ package: WarehouseExecutionPackage; destination: WarehouseExecutionLocation; onHandBaseInt: number }>(
+      `/execution/packages/${encodeURIComponent(packageIdOrCode)}/place`, {
+        method: "POST", body: JSON.stringify({ destinationCode, scannedDestinationCode: destinationCode, idempotency_key: operationId }),
+      },
+    )).data;
+  },
+  async movePackage(packageIdOrCode: string, destinationCode: string, operationId = executionOperation()) {
+    return (await request<{ package: WarehouseExecutionPackage; destination: WarehouseExecutionLocation; onHandBaseInt: number }>(
+      `/execution/packages/${encodeURIComponent(packageIdOrCode)}/move`, {
+        method: "POST", body: JSON.stringify({ destinationCode, scannedDestinationCode: destinationCode, idempotency_key: operationId }),
+      },
+    )).data;
+  },
+  async recordCount(packageIdOrCode: string, observedQuantityBaseInt: number, reason: string, operationId = executionOperation()) {
+    const countId = crypto.randomUUID();
+    return (await request<{ id: string; packageId: string; expectedQuantityBaseInt: number; observedQuantityBaseInt: number; differenceBaseInt: number; status: "MATCHED" | "PENDING_APPROVAL" }>(
+      "/execution/counts", {
+        method: "POST",
+        body: JSON.stringify({ countId, packageId: packageIdOrCode, observedQuantityBaseInt, reason, idempotency_key: operationId }),
+      },
+    )).data;
+  },
+  async receiveGoods(input: Record<string, unknown>, operationId = executionOperation()) {
+    return (await request<{ id: string; status: string; acceptedQuantityBaseInt: number; damagedQuantityBaseInt: number; shortageQuantityBaseInt: number; excessQuantityBaseInt: number; packages: WarehouseExecutionPackage[] }>("/execution/receipts", {
+      method: "POST", body: JSON.stringify({ ...input, idempotency_key: operationId }),
+    })).data;
+  },
+  async approveExcess(input: { approvalId: string; costSnapshotId: string; maximumAcceptedQuantityBaseInt: number; reason: string }, operationId = executionOperation()) {
+    return (await request<Record<string, unknown>>("/execution/receipts/excess-approvals", {
+      method: "POST", body: JSON.stringify({ ...input, idempotency_key: operationId }),
+    })).data;
+  },
+  async prepareReplenishment(productId: string, operationId = executionOperation()) {
+    return (await request<Record<string, unknown>>("/execution/replenishments/prepare", {
+      method: "POST", body: JSON.stringify({ productId, idempotency_key: operationId }),
+    })).data;
+  },
 };
 
 export const warehouseAdminApi = {

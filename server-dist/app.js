@@ -510,6 +510,23 @@ export function createWarehouseApp(config) {
     const safeAdminBody = (body) => body && typeof body === "object" && !Array.isArray(body)
         ? body
         : {};
+    app.get("/api/execution/topology", requireSession, (req, res) => forward(req, res, "GET", "/execution/topology"));
+    app.post("/api/execution/topology", requireSession, (req, res) => forward(req, res, "POST", "/execution/topology", undefined, safeAdminBody(req.body)));
+    app.get("/api/execution/settings", requireSession, (req, res) => forward(req, res, "GET", "/execution/settings"));
+    app.post("/api/execution/settings", requireSession, (req, res) => forward(req, res, "POST", "/execution/settings", undefined, safeAdminBody(req.body)));
+    app.post("/api/execution/receipts/excess-approvals", requireSession, (req, res) => forward(req, res, "POST", "/execution/receipts/excess-approvals", undefined, safeAdminBody(req.body)));
+    app.post("/api/execution/receipts", requireSession, (req, res) => forward(req, res, "POST", "/execution/receipts", undefined, safeAdminBody(req.body)));
+    app.get("/api/execution/packages/:id", requireSession, (req, res) => forward(req, res, "GET", `/execution/packages/${encodeURIComponent(String(req.params.id))}`));
+    app.post("/api/execution/packages/:id/identity", requireSession, (req, res) => forward(req, res, "POST", `/execution/packages/${encodeURIComponent(String(req.params.id))}/identity`, undefined, safeAdminBody(req.body)));
+    app.get("/api/execution/packages/:id/suggestion", requireSession, (req, res) => forward(req, res, "GET", `/execution/packages/${encodeURIComponent(String(req.params.id))}/suggestion`));
+    app.post("/api/execution/packages/:id/place", requireSession, (req, res) => forward(req, res, "POST", `/execution/packages/${encodeURIComponent(String(req.params.id))}/place`, undefined, safeAdminBody(req.body)));
+    app.post("/api/execution/packages/:id/move", requireSession, (req, res) => forward(req, res, "POST", `/execution/packages/${encodeURIComponent(String(req.params.id))}/move`, undefined, safeAdminBody(req.body)));
+    app.post("/api/execution/replenishments/prepare", requireSession, (req, res) => forward(req, res, "POST", "/execution/replenishments/prepare", undefined, safeAdminBody(req.body)));
+    app.post("/api/execution/replenishments/:id/complete", requireSession, (req, res) => forward(req, res, "POST", `/execution/replenishments/${encodeURIComponent(String(req.params.id))}/complete`, undefined, safeAdminBody(req.body)));
+    app.post("/api/execution/discrepancies", requireSession, (req, res) => forward(req, res, "POST", "/execution/discrepancies", undefined, safeAdminBody(req.body)));
+    app.post("/api/execution/counts", requireSession, (req, res) => forward(req, res, "POST", "/execution/counts", undefined, safeAdminBody(req.body)));
+    app.post("/api/execution/counts/:id/approve", requireSession, (req, res) => forward(req, res, "POST", `/execution/counts/${encodeURIComponent(String(req.params.id))}/approve`, undefined, safeAdminBody(req.body)));
+    app.get("/api/execution/products/:id/reconciliation", requireSession, (req, res) => forward(req, res, "GET", `/execution/products/${encodeURIComponent(String(req.params.id))}/reconciliation`));
     app.get("/api/admin/batches", requireSession, (req, res) => forward(req, res, "GET", "/admin/batches"));
     app.post("/api/admin/batches", requireSession, (req, res) => forward(req, res, "POST", "/admin/batches", undefined, safeAdminBody(req.body)));
     app.get("/api/admin/batches/:id", requireSession, (req, res) => forward(req, res, "GET", `/admin/batches/${encodeURIComponent(String(req.params.id))}`));

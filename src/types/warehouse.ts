@@ -252,6 +252,46 @@ export interface WarehousePackage {
   placed_by_username?: string | null;
 }
 
+export interface WarehouseExecutionPackage {
+  id: string;
+  code: string;
+  receiptId: string;
+  inventoryLotId: string | null;
+  productId: string;
+  supplierLotCode: string;
+  purchaseOrderId: string;
+  purchaseLineId: string;
+  costSnapshotId: string;
+  baseUomCode: string;
+  initialQuantityBaseInt: number;
+  remainingQuantityBaseInt: number;
+  targetQuantityBaseInt: number;
+  weightGrams: number;
+  disposition: "ACCEPTED" | "DAMAGED";
+  labelIdentity: string | null;
+  status: "RECEIVED" | "LABELED" | "PICKING" | "RESERVE" | "QUARANTINE" | "DISCREPANCY";
+  currentSlotId: string | null;
+  currentLocationCode: string | null;
+}
+
+export interface WarehouseExecutionLocation {
+  id: string;
+  code: string;
+  rackCode: string;
+  levelNumber: number;
+  positionNumber: number;
+  depthCode: string;
+  depthIndex: number;
+  isFront: boolean;
+  role: "PICKING" | "RESERVE" | "MIXED" | "QUARANTINE";
+  allowMixedSku: boolean;
+  allowMixedLot: boolean;
+  maxWeightGrams: number | null;
+  placementPriority: number;
+  lastResort: boolean;
+  heavyPenalty: number;
+}
+
 export interface ReceivingPlacedPackage {
   package_id: string;
   package_code: string;

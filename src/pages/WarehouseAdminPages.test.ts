@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
   listReceivingSessions: vi.fn(), getMyActiveReceivingPackage: vi.fn(), getReceivingSession: vi.fn(), listMyReceivingPackages: vi.fn(),
+  receiveGoods: vi.fn(),
 }));
 
 vi.mock("../features/auth/AuthContext", () => ({
@@ -15,6 +16,7 @@ vi.mock("../lib/api", () => ({
   ApiError: class ApiError extends Error { constructor(message: string, public status?: number, public code?: string) { super(message); } },
   getErrorMessage: (error: unknown) => error instanceof Error ? error.message : "Hata",
   warehouseAdminApi: api,
+  warehouseExecutionApi: { receiveGoods: api.receiveGoods },
 }));
 
 import { formatReceivingEvent, InboundPage, requestReceivingLocationWithRetry } from "./WarehouseAdminPages";
@@ -25,16 +27,15 @@ describe("Mal Kabul kullanıcı akışı", () => {
     api.getMyActiveReceivingPackage.mockReset().mockResolvedValue(null);
     api.getReceivingSession.mockReset();
     api.listMyReceivingPackages.mockReset();
+    api.receiveGoods.mockReset();
   });
-  it("manuel lokasyon öner butonu içermez ve planlı rafı otomatik yükler", () => {
+  it("yalnız V2-08 receipt komutunu kullanır ve partial policy'yi kapalı tutar", () => {
     const source = InboundPage.toString();
-    expect(source).not.toContain("Lokasyon öner");
-    expect(source).toContain("Planlanan lokasyon yükleniyor");
-    expect(source).toContain("Yerleştirilecek Raf");
-    expect(source).toContain("Benim Yerleştirdiklerim");
-    expect(source).toContain("warehouse:manage_receiving_sessions");
-    expect(source).toContain("receivingBusinessErrors");
-    expect(source).not.toContain("event.device_id");
+    expect(source).toContain("warehouseExecutionApi.receiveGoods");
+    expect(source).toContain("stageIndex: 1");
+    expect(source).toContain("isFinal: true");
+    expect(source).not.toContain("startReceivingSession");
+    expect(source).not.toContain("completeReceivingSession");
   });
 
   it("geçici lokasyon hatasını 1 ve 2 saniyelik kontrollü beklemelerle tekrar dener", async () => {
@@ -65,29 +66,28 @@ describe("Mal Kabul kullanıcı akışı", () => {
       .toBe("PCI-R100-ELB 2/4 etiketi basıldı.");
   });
 
-  it("Benim Yerleştirdiklerim kartından salt-okunur görsel ve paket detayını açar", async () => {
-    const session = {
-      id: "session-1", lot_number: "DSDST-2609", receiving_state: "active", status: "RECEIVING",
-      expected_package_count: 2, expected_unit_count: 10, placed_count: 1, lines: [], supplier_codes: ["SUP-1"], events: [],
-      progress: { sku_count: 1, total_packages: 2, placed_packages: 1, remaining_packages: 1, percent: 50 },
-    };
-    const placed = {
-      package_id: "package-1", package_code: "PKG-1", product_id: "product-1", sku: "PCI-R100-ELB",
-      product_name: "Dirsek", supplier_no: "SUP-1", lot_number: "DSDST-2609", package_number: 1,
-      total_packages: 2, quantity: 5, package_weight_kg: 2.5, image_path_snapshot: "/uploads/product.jpg",
-      image_url: "/api/products/product-1/image", location_code: "A3-K2-P5", placed_at: "2026-09-15T15:42:00Z", placed_by_username: "Alper",
-    };
-    api.listReceivingSessions.mockResolvedValue([session]);
-    api.getReceivingSession.mockResolvedValue(session);
-    api.listMyReceivingPackages.mockResolvedValue([placed]);
+  it("snapshot, gerçek kabul ve hasarlı miktarı tek aşamalı kanonik komuta gönderir", async () => {
+    api.receiveGoods.mockResolvedValue({
+      id: "receipt-1", status: "ACCEPTED_WITH_VARIANCE", acceptedQuantityBaseInt: 8,
+      damagedQuantityBaseInt: 2, shortageQuantityBaseInt: 2, excessQuantityBaseInt: 0,
+      packages: [{ id: "package-1", code: "PKG-1", receiptId: "receipt-1", inventoryLotId: "lot-1", productId: "product-1", supplierLotCode: "LOT-1", purchaseOrderId: "po-1", purchaseLineId: "line-1", costSnapshotId: "snapshot-1", baseUomCode: "piece", initialQuantityBaseInt: 8, remainingQuantityBaseInt: 8, targetQuantityBaseInt: 8, weightGrams: 0, disposition: "ACCEPTED", labelIdentity: null, status: "RECEIVED", currentSlotId: null, currentLocationCode: null }],
+    });
     const user = userEvent.setup();
     render(createElement(InboundPage));
-    expect(screen.queryByRole("heading", { name: "Yeni Mal Kabul Başlat" })).not.toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: /DSDST-2609/ }));
-    await user.click(await screen.findByRole("button", { name: /PCI-R100-ELB/ }));
-    expect(await screen.findByRole("dialog", { name: "Yerleştirilen paket detayı" })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Dirsek" })).toHaveAttribute("src", "/api/products/product-1/image");
+    await user.type(screen.getByPlaceholderText("V2-06 maliyet snapshot ID"), "snapshot-1");
+    await user.type(screen.getByPlaceholderText("Tedarikçi lotu"), "LOT-1");
+    await user.type(screen.getByPlaceholderText("Paket kodu"), "PKG-1");
+    const quantities = screen.getAllByRole("spinbutton");
+    await user.clear(quantities[0]); await user.type(quantities[0], "8");
+    await user.clear(quantities[1]); await user.type(quantities[1], "2");
+    await user.click(screen.getByRole("button", { name: "Kabulü kaydet ve paket oluştur" }));
+    expect(api.receiveGoods).toHaveBeenCalledOnce();
+    expect(api.receiveGoods.mock.calls[0][0]).toMatchObject({ costSnapshotId: "snapshot-1", supplierLotCode: "LOT-1", stageIndex: 1, isFinal: true, acceptedQuantityBaseInt: 8, damagedQuantityBaseInt: 2 });
+    expect(api.receiveGoods.mock.calls[0][0].packages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "PKG-1", quantityBaseInt: 8, disposition: "ACCEPTED" }),
+      expect.objectContaining({ code: "PKG-1-DAMAGED", quantityBaseInt: 2, disposition: "DAMAGED" }),
+    ]));
+    expect(await screen.findByText(/8 kullanılabilir, 2 karantina/)).toBeInTheDocument();
     expect(screen.getByText("PKG-1")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /yerleştir/i })).not.toBeInTheDocument();
   });
 });

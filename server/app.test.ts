@@ -103,6 +103,26 @@ describe("Warehouse BFF", () => {
     });
   });
 
+  it("V2-08 warehouse execution commands are forwarded to Panel without local inventory authority", async () => {
+    let received: { path?: string; body?: unknown; authorization?: string; key?: string } = {};
+    const panelUrl = await startPanel((req, res) => {
+      received = { path: req.path, body: req.body, authorization: req.header("authorization"), key: req.header("x-api-key") };
+      res.json({ success: true, contract: "dsdst.warehouse-execution.v1", data: { package: { id: "pkg-1" }, onHandBaseInt: 10 }, idempotent: false });
+    });
+    const body = { destinationCode: "A1-K1-P1-FRONT", scannedDestinationCode: "A1-K1-P1-FRONT", idempotency_key: "place-op" };
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .post("/api/execution/packages/pkg-1/place")
+      .set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN).send(body);
+    expect(response.status).toBe(200);
+    expect(response.body.contract).toBe("dsdst.warehouse-execution.v1");
+    expect(received).toEqual({
+      path: "/api/warehouse/v1/execution/packages/pkg-1/place",
+      body,
+      authorization: `Bearer ${SESSION}`,
+      key: SECRET,
+    });
+  });
+
   it("eksik server API key için gizli bilgi içermeyen 503 döner", async () => {
     const response = await request(createWarehouseApp({ panelApiBaseUrl: "http://panel.test" }))
       .get("/api/orders").set("Cookie", sessionCookie);
