@@ -71,6 +71,38 @@ describe("Warehouse BFF", () => {
     expect(received).toEqual({ path: "/api/warehouse/v1/catalog/products", authorization: `Bearer ${SESSION}`, key: SECRET });
   });
 
+  it("V2-07 inventory fulfillment contract'ını salt-okunur ve canlı Panel kaynağından iletir", async () => {
+    const received: { path?: string; authorization?: string; key?: string } = {};
+    const panelUrl = await startPanel((req, res) => {
+      received.path = req.path;
+      received.authorization = req.header("authorization");
+      received.key = req.header("x-api-key");
+      res.json({ success: true, contract: "dsdst.inventory-fulfillment.v1", data: { reservationId: "res-1", status: "ACTIVE", requirements: [{ lotId: "lot-old", state: "REPLENISH_SAME_LOT" }] } });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .get("/api/inventory/v1/reservations/res-1/fulfillment").set("Cookie", sessionCookie);
+    expect(response.status).toBe(200);
+    expect(response.body.data.requirements[0]).toEqual({ lotId: "lot-old", state: "REPLENISH_SAME_LOT" });
+    expect(received).toEqual({ path: "/api/warehouse/v1/inventory/reservations/res-1/fulfillment", authorization: `Bearer ${SESSION}`, key: SECRET });
+  });
+
+  it("V2-07 dispatch operation identity is preserved and unsafe fields are stripped", async () => {
+    let received: { path?: string; body?: unknown } = {};
+    const panelUrl = await startPanel((req, res) => {
+      received = { path: req.path, body: req.body };
+      res.json({ success: true, contract: "dsdst.inventory-dispatch.v1", data: { id: "res-1", status: "DISPATCHED" } });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .post("/api/inventory/v1/reservations/res-1/dispatch")
+      .set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
+      .send({ shipmentId: "ship-1", dispatchedAt: "2026-09-20T12:00:00.000Z", idempotency_key: "dispatch-op", central_stock: -99, role: "admin" });
+    expect(response.status).toBe(200);
+    expect(received).toEqual({
+      path: "/api/warehouse/v1/inventory/reservations/res-1/dispatch",
+      body: { shipmentId: "ship-1", dispatchedAt: "2026-09-20T12:00:00.000Z", idempotency_key: "dispatch-op" },
+    });
+  });
+
   it("eksik server API key için gizli bilgi içermeyen 503 döner", async () => {
     const response = await request(createWarehouseApp({ panelApiBaseUrl: "http://panel.test" }))
       .get("/api/orders").set("Cookie", sessionCookie);

@@ -428,6 +428,41 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
   });
   app.get("/api/catalog/v1/uoms", requireSession, (req, res) =>
     forward(req, res, "GET", "/catalog/uoms"));
+  app.get("/api/inventory/v1/products/:id/availability", requireSession, (req, res) =>
+    forward(req, res, "GET", `/inventory/products/${encodeURIComponent(String(req.params.id))}/availability`));
+  app.get("/api/inventory/v1/reservations/:id/fulfillment", requireSession, (req, res) =>
+    forward(req, res, "GET", `/inventory/reservations/${encodeURIComponent(String(req.params.id))}/fulfillment`));
+  app.post("/api/inventory/v1/receipts", requireSession, (req, res) =>
+    forward(req, res, "POST", "/inventory/receipts", undefined, {
+      receiptId: safeQueryText(req.body?.receiptId, 200),
+      costSnapshotId: safeQueryText(req.body?.costSnapshotId, 200),
+      receivedAt: safeQueryText(req.body?.receivedAt, 50),
+      location: {
+        id: safeQueryText(req.body?.location?.id, 200),
+        kind: safeQueryText(req.body?.location?.kind, 20),
+      },
+      idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
+  for (const transition of ["pick", "pack"] as const) {
+    app.post(`/api/inventory/v1/reservations/:id/${transition}`, requireSession, (req, res) =>
+      forward(req, res, "POST", `/inventory/reservations/${encodeURIComponent(String(req.params.id))}/${transition}`, undefined, {
+        at: safeQueryText(req.body?.at, 50) || null,
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+      }));
+  }
+  app.post("/api/inventory/v1/reservations/:id/dispatch", requireSession, (req, res) =>
+    forward(req, res, "POST", `/inventory/reservations/${encodeURIComponent(String(req.params.id))}/dispatch`, undefined, {
+      shipmentId: safeQueryText(req.body?.shipmentId, 200),
+      dispatchedAt: safeQueryText(req.body?.dispatchedAt, 50),
+      idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
+  app.post("/api/inventory/v1/reservations/:id/discrepancies", requireSession, (req, res) =>
+    forward(req, res, "POST", `/inventory/reservations/${encodeURIComponent(String(req.params.id))}/discrepancies`, undefined, {
+      lotId: safeQueryText(req.body?.lotId, 200),
+      locationId: safeQueryText(req.body?.locationId, 200),
+      reason: safeQueryText(req.body?.reason, 500),
+      idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
   app.get("/api/orders/:id", requireSession, (req, res) =>
     forward(req, res, "GET", `/orders/${encodeURIComponent(String(req.params.id))}`));
   app.get("/api/orders/:id/pick-plan", requireSession, (req, res) =>

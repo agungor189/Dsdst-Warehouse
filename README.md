@@ -13,6 +13,12 @@ Browser/PWA → aynı origin /api → Warehouse Express BFF → Panel Warehouse 
 
 Browser hiçbir API anahtarı, panel adresi veya JavaScript tarafından okunabilir JWT bilmez. Login sonucu BFF tarafından `HttpOnly`, `SameSite=Strict` cookie'ye çevrilir. BFF yalnızca tanımlı auth, toplama ve Warehouse Admin rotalarını kabul eder; genel amaçlı proxy değildir. Panel yanıtları önbelleğe alınmaz, anahtar/token içeren alanlar veya metinler frontend'e dönmeden redakte edilir.
 
+V2-07 envanter sözleşmeleri de yalnız bu BFF üzerinden Panel'e gider. Warehouse
+stok otoritesi tutmaz: alınabilir miktar, FIFO lot rezervasyonu, aynı-lot ikmal
+gereksinimi ve `STOCK_DISCREPANCY` durumu Panel'den canlı okunur. Toplama ve
+paketleme fiziksel stoğu düşürmez; OUT yalnız onaylı sevk komutunda oluşur.
+Paket/lokasyon yürütmesinin ayrıntılı yeniden bağlanması V2-08 kapsamıdır.
+
 ## Yerel geliştirme
 
 ```bash

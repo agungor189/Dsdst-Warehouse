@@ -342,6 +342,38 @@ export interface WarehouseOrder {
   items: SaleItem[];
 }
 
+export interface InventoryAvailabilityV1 {
+  productId: string;
+  baseUomCode: string;
+  onHandBaseInt: number;
+  reservedBaseInt: number;
+  availableBaseInt: number;
+}
+
+export interface InventoryFulfillmentRequirementV1 {
+  lotId: string;
+  productId: string;
+  quantityBaseInt: number;
+  state: "READY_AT_PICKING" | "REPLENISH_SAME_LOT" | "STOCK_DISCREPANCY";
+  pickingQuantityBaseInt: number;
+  reserveQuantityBaseInt: number;
+  replenishmentQuantityBaseInt: number;
+}
+
+export interface InventoryFulfillmentV1 {
+  reservationId: string;
+  status: "ACTIVE" | "PICKED" | "PACKED" | "RELEASED" | "DISPATCHED" | "STOCK_DISCREPANCY";
+  requirements: InventoryFulfillmentRequirementV1[];
+}
+
+export interface InventoryReservationV1 {
+  id: string;
+  orderId: string;
+  status: InventoryFulfillmentV1["status"];
+  shipmentId: string | null;
+  allocations: Array<{ lotId: string; productId: string; quantityBaseInt: number }>;
+}
+
 export interface PickItem {
   product_id: string;
   sku: string;

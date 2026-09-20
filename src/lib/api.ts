@@ -20,6 +20,9 @@ import type {
   WarehousePlacementPreview,
   CatalogProductV1,
   CatalogUomRegistryV1,
+  InventoryAvailabilityV1,
+  InventoryFulfillmentV1,
+  InventoryReservationV1,
 } from "../types/warehouse";
 import type { ReceivingLot, ReceivingSession } from "../types/warehouse";
 
@@ -176,6 +179,42 @@ export const catalogApi = {
   },
   async getUoms() {
     return (await request<CatalogUomRegistryV1>("/catalog/v1/uoms")).data;
+  },
+};
+
+const inventoryOperation = () => crypto.randomUUID();
+
+export const inventoryApi = {
+  async getAvailability(productId: string) {
+    return (await request<InventoryAvailabilityV1>(`/inventory/v1/products/${encodeURIComponent(productId)}/availability`)).data;
+  },
+  async getFulfillment(reservationId: string) {
+    return (await request<InventoryFulfillmentV1>(`/inventory/v1/reservations/${encodeURIComponent(reservationId)}/fulfillment`)).data;
+  },
+  async receive(input: { receiptId: string; costSnapshotId: string; receivedAt: string; location: { id: string; kind: "PICKING" | "RESERVE" } }) {
+    return (await request<Record<string, unknown>>("/inventory/v1/receipts", {
+      method: "POST", body: JSON.stringify({ ...input, idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async markPicked(reservationId: string, at?: string) {
+    return (await request<InventoryReservationV1>(`/inventory/v1/reservations/${encodeURIComponent(reservationId)}/pick`, {
+      method: "POST", body: JSON.stringify({ at, idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async markPacked(reservationId: string, at?: string) {
+    return (await request<InventoryReservationV1>(`/inventory/v1/reservations/${encodeURIComponent(reservationId)}/pack`, {
+      method: "POST", body: JSON.stringify({ at, idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async dispatch(reservationId: string, shipmentId: string, dispatchedAt: string, operationId = inventoryOperation()) {
+    return (await request<InventoryReservationV1>(`/inventory/v1/reservations/${encodeURIComponent(reservationId)}/dispatch`, {
+      method: "POST", body: JSON.stringify({ shipmentId, dispatchedAt, idempotency_key: operationId }),
+    })).data;
+  },
+  async reportDiscrepancy(reservationId: string, lotId: string, locationId: string, reason: string) {
+    return (await request<InventoryFulfillmentV1>(`/inventory/v1/reservations/${encodeURIComponent(reservationId)}/discrepancies`, {
+      method: "POST", body: JSON.stringify({ lotId, locationId, reason, idempotency_key: inventoryOperation() }),
+    })).data;
   },
 };
 
