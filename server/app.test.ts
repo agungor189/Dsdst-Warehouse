@@ -123,6 +123,30 @@ describe("Warehouse BFF", () => {
     });
   });
 
+  it("pending replenishments and scanned same-lot completion stay on the Panel execution contract", async () => {
+    const received: Array<{ method: string; path: string; body: unknown }> = [];
+    const panelUrl = await startPanel((req, res) => {
+      received.push({ method: req.method, path: req.path, body: req.body });
+      res.json({ success: true, contract: "dsdst.warehouse-replenishment-tasks.v1", data: [] });
+    });
+    const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET });
+    const list = await request(app).get("/api/execution/replenishments").set("Cookie", sessionCookie);
+    const completeBody = {
+      scannedSourcePackageCode: "RESERVE-PKG-1",
+      destinationCode: "A1-K1-P2-FRONT",
+      scannedDestinationCode: "A1-K1-P2-FRONT",
+      idempotency_key: "replenish-op",
+    };
+    const complete = await request(app).post("/api/execution/replenishments/task-1/complete")
+      .set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN).send(completeBody);
+    expect(list.status).toBe(200);
+    expect(complete.status).toBe(200);
+    expect(received).toEqual([
+      { method: "GET", path: "/api/warehouse/v1/execution/replenishments", body: undefined },
+      { method: "POST", path: "/api/warehouse/v1/execution/replenishments/task-1/complete", body: completeBody },
+    ]);
+  });
+
   it("eksik server API key için gizli bilgi içermeyen 503 döner", async () => {
     const response = await request(createWarehouseApp({ panelApiBaseUrl: "http://panel.test" }))
       .get("/api/orders").set("Cookie", sessionCookie);

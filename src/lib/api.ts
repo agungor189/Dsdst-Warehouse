@@ -18,6 +18,7 @@ import type {
   WarehousePackageListItem,
   WarehousePlacementLayout,
   WarehousePlacementPreview,
+  WarehouseReplenishmentTask,
   CatalogProductV1,
   CatalogUomRegistryV1,
   InventoryAvailabilityV1,
@@ -298,6 +299,17 @@ export const warehouseExecutionApi = {
     return (await request<Record<string, unknown>>("/execution/replenishments/prepare", {
       method: "POST", body: JSON.stringify({ productId, idempotency_key: operationId }),
     })).data;
+  },
+  async listReplenishmentTasks() {
+    return (await request<WarehouseReplenishmentTask[]>("/execution/replenishments")).data;
+  },
+  async completeReplenishment(taskId: string, scannedSourcePackageCode: string, destinationCode: string, operationId = executionOperation()) {
+    return (await request<{ id: string; state: "COMPLETED"; lotId: string; sourcePackageId: string }>(
+      `/execution/replenishments/${encodeURIComponent(taskId)}/complete`, {
+        method: "POST",
+        body: JSON.stringify({ scannedSourcePackageCode, destinationCode, scannedDestinationCode: destinationCode, idempotency_key: operationId }),
+      },
+    )).data;
   },
 };
 

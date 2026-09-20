@@ -19,7 +19,7 @@ vi.mock("../lib/api", () => ({
   warehouseExecutionApi: { receiveGoods: api.receiveGoods },
 }));
 
-import { formatReceivingEvent, InboundPage, requestReceivingLocationWithRetry } from "./WarehouseAdminPages";
+import { formatReceivingEvent, InboundPage, ReplenishmentPage, requestReceivingLocationWithRetry } from "./WarehouseAdminPages";
 
 describe("Mal Kabul kullanıcı akışı", () => {
   beforeEach(() => {
@@ -36,6 +36,14 @@ describe("Mal Kabul kullanıcı akışı", () => {
     expect(source).toContain("isFinal: true");
     expect(source).not.toContain("startReceivingSession");
     expect(source).not.toContain("completeReceivingSession");
+  });
+
+  it("ikmal ekranı bekleyen görevleri listeler ve kaynak paket ile hedef lokasyonu sırayla tarar", () => {
+    const source = ReplenishmentPage.toString();
+    expect(source).toContain("listReplenishmentTasks");
+    expect(source).toContain("completeReplenishment");
+    expect(source).toContain("scannedSource");
+    expect(source).toContain("scanDestination");
   });
 
   it("geçici lokasyon hatasını 1 ve 2 saniyelik kontrollü beklemelerle tekrar dener", async () => {

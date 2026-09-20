@@ -292,6 +292,24 @@ export interface WarehouseExecutionLocation {
   heavyPenalty: number;
 }
 
+export interface WarehouseReplenishmentTask {
+  id: string;
+  state: "LOW_WATCH" | "PREPARE_REPLENISHMENT" | "CRITICAL_NO_RESERVE" | "STOCK_DISCREPANCY";
+  productId: string;
+  sku: string;
+  lotId: string;
+  pickPackageId: string | null;
+  pickPackageCode: string | null;
+  sourcePackageId: string | null;
+  sourcePackageCode: string | null;
+  targetSlotId: string | null;
+  targetLocationCode: string | null;
+  thresholdPct: number;
+  currentPct: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ReceivingPlacedPackage {
   package_id: string;
   package_code: string;

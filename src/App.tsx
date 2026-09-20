@@ -11,7 +11,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { PickHistoryPage } from "./pages/PickHistoryPage";
 import {
   InboundPage, LabelingPage, LocationsPage, MoveStockPage, PlacementPage, PrintJobsPage,
-  StockCountPage, WarehouseAdminPage, LabelTemplatesPage,
+  ReplenishmentPage, StockCountPage, WarehouseAdminPage, LabelTemplatesPage,
 } from "./pages/WarehouseAdminPages";
 import { CapacityPage, DashboardPage, LocationsDesktopPage, MovementsPage, PackagesPage, PickingManagementPage, StockPage, UserActivityPage } from "./pages/WmsDesktopPages";
 import WarehouseLayoutPage from "./pages/WarehouseLayoutPage";
@@ -37,6 +37,7 @@ function AuthenticatedApp() {
         <Route path="/admin/labeling" element={<LabelingPage />} />
         <Route path="/admin/placement" element={<PlacementPage />} />
         <Route path="/admin/move" element={<MoveStockPage />} />
+        <Route path="/admin/replenishments" element={<ReplenishmentPage />} />
         <Route path="/admin/locations" element={<LocationsPage />} />
         <Route path="/admin/count" element={<StockCountPage />} />
         <Route path="/admin/prints" element={<PrintJobsPage />} />

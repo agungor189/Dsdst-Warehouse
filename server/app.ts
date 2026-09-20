@@ -551,6 +551,8 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     forward(req, res, "POST", `/execution/packages/${encodeURIComponent(String(req.params.id))}/move`, undefined, safeAdminBody(req.body)));
   app.post("/api/execution/replenishments/prepare", requireSession, (req, res) =>
     forward(req, res, "POST", "/execution/replenishments/prepare", undefined, safeAdminBody(req.body)));
+  app.get("/api/execution/replenishments", requireSession, (req, res) =>
+    forward(req, res, "GET", "/execution/replenishments"));
   app.post("/api/execution/replenishments/:id/complete", requireSession, (req, res) =>
     forward(req, res, "POST", `/execution/replenishments/${encodeURIComponent(String(req.params.id))}/complete`, undefined, safeAdminBody(req.body)));
   app.post("/api/execution/discrepancies", requireSession, (req, res) =>

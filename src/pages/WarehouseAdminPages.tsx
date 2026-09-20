@@ -7,7 +7,7 @@ import { ScanInput } from "../features/picking/ScanInput";
 import { hasWarehousePermission, useAuth } from "../features/auth/AuthContext";
 import { ApiError, getErrorMessage, labelApi, warehouseAdminApi, warehouseExecutionApi } from "../lib/api";
 import { locationLabelData, openPdfBlob, packageLabelData } from "../lib/labels";
-import type { ReceivingPlacedPackage, ReceivingSession, WarehouseExecutionLocation, WarehouseExecutionPackage, WarehouseLocation, WarehousePackage, WarehousePermission } from "../types/warehouse";
+import type { ReceivingPlacedPackage, ReceivingSession, WarehouseExecutionLocation, WarehouseExecutionPackage, WarehouseLocation, WarehousePackage, WarehousePermission, WarehouseReplenishmentTask } from "../types/warehouse";
 
 const permissionLabels: Record<WarehousePermission, string> = {
   "warehouse:pick_orders": "Sipariş Toplama",
@@ -44,6 +44,7 @@ const adminCards: Array<{ to: string; permission: WarehousePermission; title: st
   { to: "/admin/labeling", permission: "warehouse:print_labels", title: "Etiketleme", description: "Tedarikçi koduyla sıradaki paketi ayır ve bas", icon: Printer },
   { to: "/admin/placement", permission: "warehouse:place_packages", title: "Yerleştirme", description: "Paket ve lokasyonu sırayla okut", icon: PackageCheck },
   { to: "/admin/move", permission: "warehouse:move_stock", title: "Ürün Taşıma", description: "Paketin lokasyonunu güvenle değiştir", icon: Move },
+  { to: "/admin/replenishments", permission: "warehouse:move_stock", title: "Replenishment", description: "Bekleyen aynı-lot ikmal görevlerini tara ve tamamla", icon: RefreshCw },
   { to: "/admin/locations", permission: "warehouse:manage_locations", title: "Lokasyonlar", description: "Kapasite ve dolulukları yönet", icon: MapPin },
   { to: "/admin/count", permission: "warehouse:count_stock", title: "Stok Sayımı", description: "Paket bakiyesini say ve senkronize et", icon: Scale },
   { to: "/admin/prints", permission: "warehouse:print_labels", title: "Baskı Geçmişi", description: "Kuyruk, hata ve deneme sayılarını izle", icon: ClipboardCheck },
@@ -368,6 +369,48 @@ function TwoStepPackagePage({ mode }: { mode: "place" | "move" }) {
 
 export const PlacementPage = () => <TwoStepPackagePage mode="place"/>;
 export const MoveStockPage = () => <TwoStepPackagePage mode="move"/>;
+
+export function ReplenishmentPage() {
+  const [tasks, setTasks] = useState<WarehouseReplenishmentTask[]>([]);
+  const [selected, setSelected] = useState<WarehouseReplenishmentTask | null>(null);
+  const [scannedSource, setScannedSource] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const reload = async () => {
+    try { setTasks(await warehouseExecutionApi.listReplenishmentTasks()); setError(""); }
+    catch (reason) { setError(getErrorMessage(reason)); }
+  };
+  useEffect(() => { void reload(); }, []);
+  const scanSource = async (code: string) => {
+    if (!selected?.sourcePackageCode || code.trim().toUpperCase() !== selected.sourcePackageCode.toUpperCase()) {
+      setError("Okutulan kaynak paket bu ikmal göreviyle eşleşmiyor.");
+      return false;
+    }
+    setScannedSource(code.trim()); setError(""); return true;
+  };
+  const scanDestination = async (code: string) => {
+    if (!selected || !scannedSource) return false;
+    setBusy(true); setError("");
+    try {
+      await warehouseExecutionApi.completeReplenishment(selected.id, scannedSource, code.trim());
+      setMessage(`${selected.sourcePackageCode} → ${code.trim().toUpperCase()} aynı lot ikmali tamamlandı.`);
+      setSelected(null); setScannedSource(""); await reload(); return true;
+    } catch (reason) { setError(getErrorMessage(reason)); return false; }
+    finally { setBusy(false); }
+  };
+  return <PermissionPage permission="warehouse:move_stock"><div className="space-y-5">
+    <PageIntro eyebrow="Replenishment V2-08" title="Bekleyen ikmal görevleri" description="Panel'in otomatik oluşturduğu görevde kaynak paketi ve boş FRONT hedefini sırayla okutun. Lot seçimi değiştirilemez."/>
+    {message && <Notice message={message}/>} {error && <Notice error message={error}/>}<button className="secondary-button w-full" onClick={() => void reload()}><RefreshCw/>Yenile</button>
+    {selected ? <div className="space-y-3 rounded-2xl border border-line bg-white p-4"><b>{selected.sku} · %{selected.currentPct}</b><p className="text-sm text-muted">Lot {selected.lotId} · kaynak {selected.sourcePackageCode}</p>
+      {!scannedSource ? <ScanInput busy={busy} onScan={scanSource} label="1. Kaynak rezerv paketini okutun" placeholder={selected.sourcePackageCode || "Paket kodu"} cameraTitle="Kaynak paketi okutun"/>
+        : <ScanInput busy={busy} onScan={scanDestination} label="2. Boş FRONT hedefini okutun" placeholder="A1-K1-P1-FRONT" cameraTitle="Hedef lokasyonu okutun"/>}
+      <button className="secondary-button w-full" onClick={() => { setSelected(null); setScannedSource(""); }}>Vazgeç</button></div>
+      : <div className="space-y-2">{tasks.map((task) => <div key={task.id} className="rounded-2xl border border-line bg-white p-4"><b>{task.sku}</b><span className="float-right text-xs font-black text-moss">{task.state}</span><p className="mt-1 text-sm text-muted">%{task.currentPct} · lot {task.lotId}</p>{task.state === "PREPARE_REPLENISHMENT" && task.sourcePackageCode
+        ? <button className="primary-button mt-3 w-full" onClick={() => setSelected(task)}>Görevi başlat</button>
+        : <p className="mt-3 text-xs font-bold text-danger">{task.state === "CRITICAL_NO_RESERVE" ? "Kritik: aynı lot rezervi yok." : task.state === "STOCK_DISCREPANCY" ? "Sayım / discrepancy çözümü bekleniyor." : "İzleme eşiğinde."}</p>}</div>)}{tasks.length === 0 && <p className="state-card text-center text-sm font-bold">Bekleyen ikmal görevi yok.</p>}</div>}
+  </div></PermissionPage>;
+}
 
 export function LocationsPage() {
   const [locations, setLocations] = useState<WarehouseLocation[]>([]); const [code, setCode] = useState(""); const [capacity, setCapacity] = useState("1"); const [error, setError] = useState(""); const [message, setMessage] = useState(""); const [busyId, setBusyId] = useState("");
