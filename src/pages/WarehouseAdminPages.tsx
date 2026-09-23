@@ -18,6 +18,7 @@ const permissionLabels: Record<WarehousePermission, string> = {
   "warehouse:move_stock": "Ürün Taşıma",
   "warehouse:manage_locations": "Lokasyonlar",
   "warehouse:count_stock": "Stok Sayımı",
+  "warehouse:accept_returns": "İade Kabul",
   "warehouse:edit_label_templates": "Etiket Şablonları",
   "warehouse:view_map": "Depo Haritası",
   "warehouse:view_analytics": "Depo Analizi",

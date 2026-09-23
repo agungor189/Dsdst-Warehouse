@@ -15,6 +15,7 @@ import {
 } from "./pages/WarehouseAdminPages";
 import { CapacityPage, DashboardPage, LocationsDesktopPage, MovementsPage, PackagesPage, PickingManagementPage, StockPage, UserActivityPage } from "./pages/WmsDesktopPages";
 import WarehouseLayoutPage from "./pages/WarehouseLayoutPage";
+import ReturnAcceptancePage from "./pages/ReturnAcceptancePage";
 
 const WarehouseMapPage = lazy(() => import("./pages/WarehouseMapPage"));
 
@@ -34,6 +35,7 @@ function AuthenticatedApp() {
         <Route path="/history" element={<PickHistoryPage />} />
         <Route path="/admin" element={<WarehouseAdminPage />} />
         <Route path="/admin/inbound" element={<InboundPage />} />
+        <Route path="/returns" element={<ReturnAcceptancePage />} />
         <Route path="/admin/labeling" element={<LabelingPage />} />
         <Route path="/admin/placement" element={<PlacementPage />} />
         <Route path="/admin/move" element={<MoveStockPage />} />

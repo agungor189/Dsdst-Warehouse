@@ -457,6 +457,18 @@ export function createWarehouseApp(config) {
         reason: safeQueryText(req.body?.reason, 500),
         idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
     }));
+    app.get("/api/returns", requireSession, (req, res) => forward(req, res, "GET", "/returns"));
+    app.get("/api/returns/:id", requireSession, (req, res) => forward(req, res, "GET", `/returns/${encodeURIComponent(String(req.params.id))}`));
+    app.post("/api/returns/:id/receipts", requireSession, (req, res) => forward(req, res, "POST", `/returns/${encodeURIComponent(String(req.params.id))}/receipts`, undefined, {
+        lines: Array.isArray(req.body?.lines) ? req.body.lines.slice(0, 100).map((line) => ({
+            returnLineId: safeQueryText(line?.returnLineId, 200),
+            quantityBaseInt: Number(line?.quantityBaseInt),
+            disposition: safeQueryText(line?.disposition, 40),
+            locationId: safeQueryText(line?.locationId, 200) || null,
+        })) : [],
+        receivedAt: safeQueryText(req.body?.receivedAt, 50) || null,
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
     app.get("/api/orders/:id", requireSession, (req, res) => forward(req, res, "GET", `/orders/${encodeURIComponent(String(req.params.id))}`));
     app.get("/api/orders/:id/pick-plan", requireSession, (req, res) => forward(req, res, "GET", `/orders/${encodeURIComponent(String(req.params.id))}/pick-plan`));
     app.get("/api/scan/:code", requireSession, (req, res) => forward(req, res, "GET", `/scan/${encodeURIComponent(String(req.params.code))}`));

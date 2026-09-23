@@ -221,6 +221,16 @@ export const inventoryApi = {
   },
 };
 
+export const returnsApi = {
+  async listApproved() { return (await request<any[]>("/returns")).data; },
+  async get(returnId: string) { return (await request<any>(`/returns/${encodeURIComponent(returnId)}`)).data; },
+  async receive(returnId: string, lines: Array<{ returnLineId: string; quantityBaseInt: number; disposition: "SELLABLE" | "DAMAGED" | "MISSING_NOT_RECEIVED"; locationId?: string | null }>, operationId = crypto.randomUUID()) {
+    return (await request<any>(`/returns/${encodeURIComponent(returnId)}/receipts`, {
+      method: "POST", body: JSON.stringify({ lines, receivedAt: new Date().toISOString(), idempotency_key: operationId }),
+    })).data;
+  },
+};
+
 export const authApi = {
   async login(username: string, password: string) {
     return (await request<AuthUser>("/auth/login", {

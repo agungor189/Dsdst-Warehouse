@@ -123,6 +123,24 @@ describe("Warehouse BFF", () => {
     });
   });
 
+  it("V2-10 return acceptance preserves operation identity and remains a Panel-owned command", async () => {
+    const received: Array<{ method: string; path: string; body: any }> = [];
+    const panelUrl = await startPanel((req, res) => {
+      received.push({ method: req.method, path: req.path, body: req.body });
+      res.json({ success: true, contract: "dsdst.warehouse-return-acceptance.v1", data: req.method === "GET" ? [] : { id: "return-1" } });
+    });
+    const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET, allowedOrigins: [TRUSTED_ORIGIN] });
+    const list = await request(app).get("/api/returns").set("Cookie", sessionCookie);
+    expect(list.status).toBe(200);
+    const body = { lines: [{ returnLineId: "line-1", quantityBaseInt: 1, disposition: "DAMAGED", locationId: "Q1" }], receivedAt: "2026-09-23T10:00:00.000Z", idempotency_key: "return-op-1" };
+    const receipt = await request(app).post("/api/returns/return-1/receipts").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN).send(body);
+    expect(receipt.status).toBe(200);
+    expect(received).toEqual([
+      { method: "GET", path: "/api/warehouse/v1/returns", body: undefined },
+      { method: "POST", path: "/api/warehouse/v1/returns/return-1/receipts", body },
+    ]);
+  });
+
   it("pending replenishments and scanned same-lot completion stay on the Panel execution contract", async () => {
     const received: Array<{ method: string; path: string; body: unknown }> = [];
     const panelUrl = await startPanel((req, res) => {

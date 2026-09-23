@@ -17,6 +17,7 @@ export type WarehousePermission =
   | "warehouse:move_stock"
   | "warehouse:manage_locations"
   | "warehouse:count_stock"
+  | "warehouse:accept_returns"
   | "warehouse:edit_label_templates"
   | "warehouse:view_map"
   | "warehouse:view_analytics";
