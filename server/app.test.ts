@@ -86,21 +86,51 @@ describe("Warehouse BFF", () => {
     expect(received).toEqual({ path: "/api/warehouse/v1/inventory/reservations/res-1/fulfillment", authorization: `Bearer ${SESSION}`, key: SECRET });
   });
 
-  it("V2-07 dispatch operation identity is preserved and unsafe fields are stripped", async () => {
-    let received: { path?: string; body?: unknown } = {};
+  it("legacy inventory dispatch is closed before physical carrier handoff", async () => {
+    let called = false;
     const panelUrl = await startPanel((req, res) => {
-      received = { path: req.path, body: req.body };
-      res.json({ success: true, contract: "dsdst.inventory-dispatch.v1", data: { id: "res-1", status: "DISPATCHED" } });
+      called = true;
+      res.status(500).end();
     });
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
       .post("/api/inventory/v1/reservations/res-1/dispatch")
       .set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
       .send({ shipmentId: "ship-1", dispatchedAt: "2026-09-20T12:00:00.000Z", idempotency_key: "dispatch-op", central_stock: -99, role: "admin" });
-    expect(response.status).toBe(200);
-    expect(received).toEqual({
-      path: "/api/warehouse/v1/inventory/reservations/res-1/dispatch",
-      body: { shipmentId: "ship-1", dispatchedAt: "2026-09-20T12:00:00.000Z", idempotency_key: "dispatch-op" },
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe("PHYSICAL_HANDOFF_REQUIRED");
+    expect(called).toBe(false);
+  });
+
+  it("V2-13 handoff identity/evidence/actual charge are whitelisted to the Panel-owned gateway", async () => {
+    let received: { path?: string; body?: unknown } = {};
+    const panelUrl = await startPanel((req, res) => {
+      received = { path: req.path, body: req.body };
+      res.json({ success: true, contract: "dsdst.shipment.v1", data: { id: "ship-1", state: "DISPATCHED" } });
     });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .post("/api/shipping/v1/shipments/ship-1/handoff")
+      .set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
+      .send({ handedOffAt: "2026-09-23T12:00:00.000Z", handoffEvidence: { kind: "SCAN", reference: "dock-7", unsafe: "drop" },
+        actualCharge: { amountMinor: 8750, currency: "try", provenance: { source: "invoice", reference: "inv-7", secret: "drop" } },
+        idempotency_key: "handoff-op", central_stock: -99, role: "admin" });
+    expect(response.status).toBe(200);
+    expect(received).toEqual({ path: "/api/warehouse/v1/shipping/shipments/ship-1/handoff", body: {
+      handedOffAt: "2026-09-23T12:00:00.000Z", handoffEvidence: { kind: "SCAN", reference: "dock-7" },
+      actualCharge: { amountMinor: 8750, currency: "TRY", provenance: { source: "invoice", reference: "inv-7" } },
+      idempotency_key: "handoff-op",
+    } });
+  });
+
+  it("V2-13 rejects COD locally and does not call Panel", async () => {
+    let called = false;
+    const panelUrl = await startPanel((_req, res) => { called = true; res.status(500).end(); });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .post("/api/shipping/v1/shipments/ship-1/carrier-selection")
+      .set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
+      .send({ cashOnDelivery: true });
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe("COD_FORBIDDEN");
+    expect(called).toBe(false);
   });
 
   it("V2-08 warehouse execution commands are forwarded to Panel without local inventory authority", async () => {

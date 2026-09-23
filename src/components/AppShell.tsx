@@ -1,4 +1,4 @@
-import { Activity, ArrowLeft, Boxes, ClipboardList, Layers3, LayoutDashboard, LogOut, Map, MapPin, Menu, Move, PackageCheck, RotateCcw, Settings2, UserRound, WifiOff, X } from "lucide-react";
+import { Activity, ArrowLeft, Boxes, ClipboardList, Layers3, LayoutDashboard, LogOut, Map, MapPin, Menu, Move, PackageCheck, RotateCcw, Settings2, Truck, UserRound, WifiOff, X } from "lucide-react";
 import { useState, type PropsWithChildren } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useOnlineStatus } from "../hooks/useOnlineStatus";
@@ -20,6 +20,7 @@ export function AppShell({ children }: PropsWithChildren) {
     { label: "Order Picking", to: "/picking-management", icon: ClipboardList },
     { label: "Mal Kabul", to: "/admin/inbound", icon: PackageCheck, permission: "warehouse:receive" as const },
     { label: "İade Kabul", to: "/returns", icon: RotateCcw, permission: "warehouse:accept_returns" as const },
+    { label: "Sevkiyat", to: "/shipments", icon: Truck, permission: "shipping:manage" as const },
     { label: "Ürün Taşıma", to: "/admin/move", icon: Move, permission: "warehouse:move_stock" as const },
     { section: "DEPO" },
     { label: "Depo Yerleşimi", to: "/warehouse-layout", icon: Layers3, permission: "warehouse:view_map" as const },

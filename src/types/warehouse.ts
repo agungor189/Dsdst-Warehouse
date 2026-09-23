@@ -18,9 +18,39 @@ export type WarehousePermission =
   | "warehouse:manage_locations"
   | "warehouse:count_stock"
   | "warehouse:accept_returns"
+  | "shipping:manage"
+  | "shipping:dispatch"
   | "warehouse:edit_label_templates"
   | "warehouse:view_map"
   | "warehouse:view_analytics";
+
+export type ShipmentState = "PREPARING" | "CARRIER_SELECTED" | "BOOKED" | "LABEL_READY" | "HANDED_OFF" | "DISPATCHED" | "CANCELLED" | "EXCEPTION";
+
+export interface ShipmentV1 {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  reservationId: string;
+  state: ShipmentState;
+  packageCount: number;
+  packages: Array<{
+    id: string;
+    packageNumber: number;
+    measurementSource: "MEASURED" | "RECIPE_ESTIMATE";
+    dimensionsMm: { length: number; width: number; height: number };
+    weightGrams: number;
+    booking: null | { trackingNumber: string | null; trackingUrl: string | null };
+    label: null | { reference: string; sha256: string; mediaType: string; widthMm: 100; heightMm: 150; dpi: 203 };
+  }>;
+  carrierSelection: null | {
+    provider: "GELIVER";
+    carrierCode: string;
+    serviceCode: string;
+    quote: { id: string; amountMinor: number; currency: string; provenance: unknown };
+  };
+  handedOffAt: string | null;
+  dispatchedAt: string | null;
+}
 
 export interface WarehouseLayoutObject {
   id: string;

@@ -446,9 +446,70 @@ export function createWarehouseApp(config) {
             idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
         }));
     }
-    app.post("/api/inventory/v1/reservations/:id/dispatch", requireSession, (req, res) => forward(req, res, "POST", `/inventory/reservations/${encodeURIComponent(String(req.params.id))}/dispatch`, undefined, {
-        shipmentId: safeQueryText(req.body?.shipmentId, 200),
-        dispatchedAt: safeQueryText(req.body?.dispatchedAt, 50),
+    app.post("/api/inventory/v1/reservations/:id/dispatch", requireSession, (req, res) => res.status(409).json({ success: false, error: { code: "PHYSICAL_HANDOFF_REQUIRED",
+            message: "Stok çıkışı yalnız doğrulanmış fiziksel taşıyıcı teslimiyle yapılabilir." } }));
+    app.get("/api/shipping/v1/provider-contracts/geliver", requireSession, (req, res) => forward(req, res, "GET", "/shipping/provider-contracts/geliver"));
+    app.get("/api/shipping/v1/shipments/:id", requireSession, (req, res) => forward(req, res, "GET", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}`));
+    app.get("/api/shipping/v1/reservations/:id/shipment", requireSession, (req, res) => forward(req, res, "GET", `/shipping/reservations/${encodeURIComponent(String(req.params.id))}/shipment`));
+    app.post("/api/shipping/v1/shipments/:id/packages", requireSession, (req, res) => {
+        const packages = Array.isArray(req.body?.packages) ? req.body.packages.slice(0, 50).map((item) => ({
+            packageNumber: Number(item?.packageNumber),
+            recipePackageNumber: item?.recipePackageNumber == null ? null : Number(item.recipePackageNumber),
+            measured: item?.measured ? {
+                lengthMm: Number(item.measured.lengthMm), widthMm: Number(item.measured.widthMm),
+                heightMm: Number(item.measured.heightMm), weightGrams: Number(item.measured.weightGrams),
+            } : null,
+            contents: Array.isArray(item?.contents) ? item.contents.slice(0, 200).map((content) => ({
+                productId: safeQueryText(content?.productId, 200), quantityBaseInt: Number(content?.quantityBaseInt),
+            })) : [],
+        })) : [];
+        return forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/packages`, undefined, {
+            packages, idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+        });
+    });
+    app.post("/api/shipping/v1/shipments/:id/carrier-selection", requireSession, (req, res) => {
+        if (req.body?.cashOnDelivery === true)
+            return res.status(409).json({ success: false, error: { code: "COD_FORBIDDEN", message: "Kapıda ödeme desteklenmiyor." } });
+        return forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/carrier-selection`, undefined, {
+            provider: "GELIVER",
+            carrierCode: safeQueryText(req.body?.carrierCode, 100),
+            serviceCode: safeQueryText(req.body?.serviceCode, 100),
+            cashOnDelivery: false,
+            quote: {
+                quoteId: safeQueryText(req.body?.quote?.quoteId, 200),
+                amountMinor: Number(req.body?.quote?.amountMinor),
+                currency: safeQueryText(req.body?.quote?.currency, 3).toUpperCase(),
+                provenance: {
+                    source: safeQueryText(req.body?.quote?.provenance?.source, 100),
+                    reference: safeQueryText(req.body?.quote?.provenance?.reference, 500),
+                },
+            },
+            idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+        });
+    });
+    app.post("/api/shipping/v1/shipments/:id/booking", requireSession, (req, res) => forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/booking`, undefined, {
+        requestedAt: safeQueryText(req.body?.requestedAt, 50) || null,
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
+    app.post("/api/shipping/v1/shipments/:id/cancel", requireSession, (req, res) => forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/cancel`, undefined, {
+        reason: safeQueryText(req.body?.reason, 500),
+        cancelledAt: safeQueryText(req.body?.cancelledAt, 50) || null,
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
+    app.post("/api/shipping/v1/shipments/:id/handoff", requireSession, (req, res) => forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/handoff`, undefined, {
+        handedOffAt: safeQueryText(req.body?.handedOffAt, 50),
+        handoffEvidence: {
+            kind: safeQueryText(req.body?.handoffEvidence?.kind, 100),
+            reference: safeQueryText(req.body?.handoffEvidence?.reference, 500),
+        },
+        actualCharge: req.body?.actualCharge ? {
+            amountMinor: Number(req.body.actualCharge.amountMinor),
+            currency: safeQueryText(req.body.actualCharge.currency, 3).toUpperCase(),
+            provenance: {
+                source: safeQueryText(req.body.actualCharge.provenance?.source, 100),
+                reference: safeQueryText(req.body.actualCharge.provenance?.reference, 500),
+            },
+        } : undefined,
         idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
     }));
     app.post("/api/inventory/v1/reservations/:id/discrepancies", requireSession, (req, res) => forward(req, res, "POST", `/inventory/reservations/${encodeURIComponent(String(req.params.id))}/discrepancies`, undefined, {

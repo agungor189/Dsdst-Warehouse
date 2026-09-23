@@ -26,6 +26,7 @@ import type {
   InventoryReservationV1,
   WarehouseExecutionPackage,
   WarehouseExecutionLocation,
+  ShipmentV1,
 } from "../types/warehouse";
 import type { ReceivingLot, ReceivingSession } from "../types/warehouse";
 
@@ -209,14 +210,49 @@ export const inventoryApi = {
       method: "POST", body: JSON.stringify({ at, idempotency_key: inventoryOperation() }),
     })).data;
   },
-  async dispatch(reservationId: string, shipmentId: string, dispatchedAt: string, operationId = inventoryOperation()) {
-    return (await request<InventoryReservationV1>(`/inventory/v1/reservations/${encodeURIComponent(reservationId)}/dispatch`, {
-      method: "POST", body: JSON.stringify({ shipmentId, dispatchedAt, idempotency_key: operationId }),
-    })).data;
-  },
   async reportDiscrepancy(reservationId: string, lotId: string, locationId: string, reason: string) {
     return (await request<InventoryFulfillmentV1>(`/inventory/v1/reservations/${encodeURIComponent(reservationId)}/discrepancies`, {
       method: "POST", body: JSON.stringify({ lotId, locationId, reason, idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+};
+
+export const shipmentApi = {
+  async get(shipmentId: string) {
+    return (await request<ShipmentV1>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}`)).data;
+  },
+  async getForReservation(reservationId: string) {
+    return (await request<ShipmentV1>(`/shipping/v1/reservations/${encodeURIComponent(reservationId)}/shipment`)).data;
+  },
+  async definePackages(shipmentId: string, packages: Array<Record<string, unknown>>) {
+    return (await request<ShipmentV1["packages"]>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/packages`, {
+      method: "POST", body: JSON.stringify({ packages, idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async selectCarrier(shipmentId: string, input: { carrierCode: string; serviceCode: string; quoteId: string; quoteAmountMinor: number; currency: string; quoteReference: string }) {
+    return (await request<ShipmentV1>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/carrier-selection`, {
+      method: "POST", body: JSON.stringify({ provider: "GELIVER", carrierCode: input.carrierCode, serviceCode: input.serviceCode,
+        cashOnDelivery: false, quote: { quoteId: input.quoteId, amountMinor: input.quoteAmountMinor, currency: input.currency,
+          provenance: { source: "OPERATOR_GELIVER_QUOTE", reference: input.quoteReference } }, idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async requestBooking(shipmentId: string) {
+    return (await request<{ shipment: ShipmentV1 }>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/booking`, {
+      method: "POST", body: JSON.stringify({ requestedAt: new Date().toISOString(), idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async cancel(shipmentId: string, reason: string) {
+    return (await request<ShipmentV1>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/cancel`, {
+      method: "POST", body: JSON.stringify({ reason, cancelledAt: new Date().toISOString(), idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async confirmHandoff(shipmentId: string, input: { evidenceReference: string; actualChargeMinor?: number; currency?: string; chargeReference?: string }) {
+    return (await request<ShipmentV1>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/handoff`, {
+      method: "POST", body: JSON.stringify({ handedOffAt: new Date().toISOString(),
+        handoffEvidence: { kind: "OPERATOR_CARRIER_HANDOFF", reference: input.evidenceReference },
+        ...(input.actualChargeMinor == null ? {} : { actualCharge: { amountMinor: input.actualChargeMinor,
+          currency: input.currency || "TRY", provenance: { source: "GELIVER_ACTUAL_CHARGE", reference: input.chargeReference || input.evidenceReference } } }),
+        idempotency_key: inventoryOperation() }),
     })).data;
   },
 };
