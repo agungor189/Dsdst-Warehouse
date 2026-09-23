@@ -223,6 +223,16 @@ export const inventoryApi = {
   },
 };
 
+export type WarehouseReconciliationFinding = {
+  id: string; code: string; severity: "INFO" | "WARN" | "CRITICAL"; affectedId: string;
+  expected: unknown; actual: unknown; repairStatus: string; occurrences: number; lastSeenAt: string;
+};
+export const reconciliationApi = {
+  async listStockFindings() {
+    return (await request<WarehouseReconciliationFinding[]>("/reconciliation")).data;
+  },
+};
+
 export const shipmentApi = {
   async get(shipmentId: string) {
     return (await request<ShipmentV1>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}`)).data;

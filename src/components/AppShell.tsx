@@ -1,4 +1,4 @@
-import { Activity, ArrowLeft, Boxes, ClipboardList, Layers3, LayoutDashboard, LogOut, Map, MapPin, Menu, Move, PackageCheck, RotateCcw, Settings2, Truck, UserRound, WifiOff, X } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, Boxes, ClipboardList, Layers3, LayoutDashboard, LogOut, Map, MapPin, Menu, Move, PackageCheck, RotateCcw, Settings2, Truck, UserRound, WifiOff, X } from "lucide-react";
 import { useState, type PropsWithChildren } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useOnlineStatus } from "../hooks/useOnlineStatus";
@@ -32,6 +32,7 @@ export function AppShell({ children }: PropsWithChildren) {
     { label: "Hareketler", to: "/movements", icon: Activity, permission: "warehouse:view_analytics" as const },
     { label: "Kullanıcı Aktiviteleri", to: "/user-activity", icon: Activity, permission: "warehouse:view_analytics" as const },
     { label: "Kapasite", to: "/capacity", icon: LayoutDashboard, permission: "warehouse:view_analytics" as const },
+    { label: "Sistem Kontrolü", to: "/reconciliation", icon: AlertTriangle, permission: "warehouse:view_analytics" as const },
     { section: "YÖNETİM" },
     { label: "Ayarlar", to: "/admin", icon: Settings2 },
   ];

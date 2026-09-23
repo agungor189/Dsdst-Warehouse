@@ -447,6 +447,8 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     forward(req, res, "GET", `/inventory/products/${encodeURIComponent(String(req.params.id))}/availability`));
   app.get("/api/inventory/v1/reservations/:id/fulfillment", requireSession, (req, res) =>
     forward(req, res, "GET", `/inventory/reservations/${encodeURIComponent(String(req.params.id))}/fulfillment`));
+  app.get("/api/reconciliation", requireSession, (req, res) =>
+    forward(req, res, "GET", "/reconciliation"));
   app.post("/api/inventory/v1/receipts", requireSession, (req, res) =>
     forward(req, res, "POST", "/inventory/receipts", undefined, {
       receiptId: safeQueryText(req.body?.receiptId, 200),
