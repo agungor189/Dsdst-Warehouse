@@ -133,6 +133,37 @@ describe("Warehouse BFF", () => {
     expect(called).toBe(false);
   });
 
+  it("V2-13 forwards recipient-only live Geliver offer flow, selected offer, refresh, and pre-handoff cancel", async () => {
+    const received: Array<{ method: string; path: string; body: any }> = [];
+    const panelUrl = await startPanel((req, res) => {
+      received.push({ method: req.method, path: req.path, body: req.body });
+      res.json({ success: true, contract: "dsdst.geliver-live-offers.v2", data: [] });
+    });
+    const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET });
+    const headers = { Cookie: sessionCookie, Origin: TRUSTED_ORIGIN };
+    await request(app).post("/api/shipping/v1/shipments/ship-1/geliver/offers").set(headers).send({
+      recipient: { name: "Customer", email: "customer@example.test", phone: "555", address1: "Address 1", address2: "Address 2",
+        countryCode: "tr", cityName: "Istanbul", cityCode: "34", districtName: "Kadikoy", districtID: "1", zip: "34710",
+        providerShipmentId: "must-drop", unsafe: "must-drop" }, idempotency_key: "offers-op", carrierCode: "must-drop",
+    }).expect(200);
+    await request(app).post("/api/shipping/v1/shipments/ship-1/geliver/offers/offer-1/accept").set(headers)
+      .send({ idempotency_key: "accept-op", providerTransactionId: "must-drop" }).expect(200);
+    await request(app).post("/api/shipping/v1/shipments/ship-1/geliver/refresh").set(headers).send({ idempotency_key: "refresh-op" }).expect(200);
+    await request(app).post("/api/shipping/v1/shipments/ship-1/cancel").set(headers)
+      .send({ reason: "CUSTOMER_REQUEST", cancelledAt: "2026-09-23T13:00:00.000Z", idempotency_key: "cancel-op", providerShipmentId: "drop" }).expect(200);
+    expect(received).toEqual([
+      { method: "POST", path: "/api/warehouse/v1/shipping/shipments/ship-1/geliver/offers", body: { recipient: {
+        name: "Customer", email: "customer@example.test", phone: "555", address1: "Address 1", address2: "Address 2",
+        countryCode: "TR", cityName: "Istanbul", cityCode: "34", districtName: "Kadikoy", districtID: "1", zip: "34710",
+      }, idempotency_key: "offers-op" } },
+      { method: "POST", path: "/api/warehouse/v1/shipping/shipments/ship-1/geliver/offers/offer-1/accept", body: { idempotency_key: "accept-op" } },
+      { method: "POST", path: "/api/warehouse/v1/shipping/shipments/ship-1/geliver/refresh", body: { idempotency_key: "refresh-op" } },
+      { method: "POST", path: "/api/warehouse/v1/shipping/shipments/ship-1/cancel", body: {
+        reason: "CUSTOMER_REQUEST", cancelledAt: "2026-09-23T13:00:00.000Z", idempotency_key: "cancel-op",
+      } },
+    ]);
+  });
+
   it("V2-08 warehouse execution commands are forwarded to Panel without local inventory authority", async () => {
     let received: { path?: string; body?: unknown; authorization?: string; key?: string } = {};
     const panelUrl = await startPanel((req, res) => {

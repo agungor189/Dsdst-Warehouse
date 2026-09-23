@@ -499,6 +499,27 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
       requestedAt: safeQueryText(req.body?.requestedAt, 50) || null,
       idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
     }));
+  app.post("/api/shipping/v1/shipments/:id/geliver/offers", requireSession, (req, res) =>
+    forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/geliver/offers`, undefined, {
+      recipient: {
+        name: safeQueryText(req.body?.recipient?.name, 200), email: safeQueryText(req.body?.recipient?.email, 320),
+        phone: safeQueryText(req.body?.recipient?.phone, 50) || null,
+        address1: safeQueryText(req.body?.recipient?.address1, 500), address2: safeQueryText(req.body?.recipient?.address2, 500) || null,
+        countryCode: safeQueryText(req.body?.recipient?.countryCode, 3).toUpperCase(),
+        cityName: safeQueryText(req.body?.recipient?.cityName, 100), cityCode: safeQueryText(req.body?.recipient?.cityCode, 30),
+        districtName: safeQueryText(req.body?.recipient?.districtName, 100), districtID: safeQueryText(req.body?.recipient?.districtID, 50) || null,
+        zip: safeQueryText(req.body?.recipient?.zip, 30) || null,
+      },
+      idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
+  app.post("/api/shipping/v1/shipments/:id/geliver/refresh", requireSession, (req, res) =>
+    forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/geliver/refresh`, undefined, {
+      idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
+  app.post("/api/shipping/v1/shipments/:id/geliver/offers/:offerId/accept", requireSession, (req, res) =>
+    forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/geliver/offers/${encodeURIComponent(String(req.params.offerId))}/accept`, undefined, {
+      idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
   app.post("/api/shipping/v1/shipments/:id/cancel", requireSession, (req, res) =>
     forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/cancel`, undefined, {
       reason: safeQueryText(req.body?.reason, 500),

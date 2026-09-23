@@ -26,7 +26,7 @@ import type {
   InventoryReservationV1,
   WarehouseExecutionPackage,
   WarehouseExecutionLocation,
-  ShipmentV1,
+  ShipmentV1, GeliverLivePackage,
 } from "../types/warehouse";
 import type { ReceivingLot, ReceivingSession } from "../types/warehouse";
 
@@ -239,6 +239,22 @@ export const shipmentApi = {
   async requestBooking(shipmentId: string) {
     return (await request<{ shipment: ShipmentV1 }>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/booking`, {
       method: "POST", body: JSON.stringify({ requestedAt: new Date().toISOString(), idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async loadGeliverOffers(shipmentId: string, recipient: { name: string; email: string; phone?: string; address1: string;
+    address2?: string; countryCode: string; cityName: string; cityCode: string; districtName: string; districtID?: string; zip?: string }) {
+    return (await request<GeliverLivePackage[]>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/geliver/offers`, {
+      method: "POST", body: JSON.stringify({ recipient, idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async refreshGeliver(shipmentId: string) {
+    return (await request<GeliverLivePackage[]>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/geliver/refresh`, {
+      method: "POST", body: JSON.stringify({ idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async acceptGeliverOffer(shipmentId: string, offerId: string) {
+    return (await request<ShipmentV1>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/geliver/offers/${encodeURIComponent(offerId)}/accept`, {
+      method: "POST", body: JSON.stringify({ idempotency_key: inventoryOperation() }),
     })).data;
   },
   async cancel(shipmentId: string, reason: string) {

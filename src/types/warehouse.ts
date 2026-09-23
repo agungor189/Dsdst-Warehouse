@@ -33,23 +33,43 @@ export interface ShipmentV1 {
   reservationId: string;
   state: ShipmentState;
   packageCount: number;
+  requiredContents: Array<{ productId: string; sku: string; title: string; quantityBaseInt: number; baseUomCode: string }>;
+  recipient: null | { name: string; email: string; phone: string | null; address1: string; address2: string | null;
+    countryCode: string; cityName: string; cityCode: string; districtName: string; districtID: string | null; zip: string | null };
   packages: Array<{
     id: string;
     packageNumber: number;
     measurementSource: "MEASURED" | "RECIPE_ESTIMATE";
     dimensionsMm: { length: number; width: number; height: number };
     weightGrams: number;
-    booking: null | { trackingNumber: string | null; trackingUrl: string | null };
-    label: null | { reference: string; sha256: string; mediaType: string; widthMm: 100; heightMm: 150; dpi: 203 };
+    contents: Array<{ productId: string; quantityBaseInt: number }>;
+    booking: null | { providerShipmentId: string; providerTransactionId: string | null; barcode: string | null;
+      carrierCode: string; serviceCode: string; trackingNumber: string | null; trackingUrl: string | null };
+    label: null | { reference: string; responsiveReference: string | null; sha256: string | null; mediaType: string | null; providerNative: true };
   }>;
   carrierSelection: null | {
     provider: "GELIVER";
     carrierCode: string;
     serviceCode: string;
-    quote: { id: string; amountMinor: number; currency: string; provenance: unknown };
+    quote: { id: string; amount?: string; amountMinor?: number; currency: string; provenance: unknown };
   };
   handedOffAt: string | null;
   dispatchedAt: string | null;
+}
+
+export interface GeliverLivePackage {
+  providerShipmentId: string;
+  packageId: string;
+  providerOrderNumber: string;
+  createState: string;
+  bookingState: string | null;
+  providerTransactionId: string | null;
+  barcode: string | null;
+  selectedOffer: null | { id: string; carrier: string; service: string; amount: string; currency: string };
+  offers: Array<{ id: string; carrier: string; service: string; amount: string; currency: string;
+    amountLocal: string | null; currencyLocal: string | null; estimatedArrivalAt: string | null; durationTerms: string | null }>;
+  tracking: { number: string | null; url: string | null; stateCode: string | null };
+  label: null | { url: string; responsiveUrl: string | null; fileType: string | null; artifactSha256: string | null };
 }
 
 export interface WarehouseLayoutObject {
