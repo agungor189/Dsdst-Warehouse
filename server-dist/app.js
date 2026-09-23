@@ -94,7 +94,16 @@ export function createWarehouseApp(config) {
         secure: config.cookieSecure ?? false,
         path: "/",
     };
-    if (Number.isInteger(config.trustProxyHops) && Number(config.trustProxyHops) > 0) {
+    const allowedOrigins = new Set((config.allowedOrigins || []).flatMap((value) => {
+        try {
+            return [new URL(value).origin];
+        }
+        catch {
+            return [];
+        }
+    }));
+    const trustProxy = Number.isInteger(config.trustProxyHops) && Number(config.trustProxyHops) > 0;
+    if (trustProxy) {
         app.set("trust proxy", Number(config.trustProxyHops));
     }
     app.disable("x-powered-by");
@@ -189,6 +198,27 @@ export function createWarehouseApp(config) {
         }
     };
     const safeResponse = (body, sessionToken = "") => rewritePanelPaths(redactSensitive(body, [config.warehouseApiKey || "", sessionToken]));
+    const requireTrustedOrigin = (req, res) => {
+        if (["GET", "HEAD", "OPTIONS"].includes(req.method))
+            return true;
+        const origin = req.headers.origin;
+        if (!origin) {
+            res.status(403).json({ success: false, error: { code: "CSRF_FORBIDDEN", message: "Unsafe istek için Origin header zorunludur." } });
+            return false;
+        }
+        const forwardedHost = trustProxy ? String(req.headers["x-forwarded-host"] || "").split(",", 1)[0].trim() : "";
+        const host = forwardedHost || req.get("host");
+        let effectiveOrigin = "";
+        try {
+            effectiveOrigin = host ? new URL(`${req.protocol}://${host}`).origin : "";
+        }
+        catch { }
+        if (origin !== effectiveOrigin && !allowedOrigins.has(origin)) {
+            res.status(403).json({ success: false, error: { code: "CSRF_FORBIDDEN", message: "Origin izinli değil." } });
+            return false;
+        }
+        return true;
+    };
     const requireSession = (req, res, next) => {
         const token = readCookie(req, SESSION_COOKIE);
         if (!token) {
@@ -197,8 +227,42 @@ export function createWarehouseApp(config) {
                 error: { code: "SESSION_REQUIRED", message: "Oturum açmanız gerekiyor." },
             });
         }
+        if (!requireTrustedOrigin(req, res))
+            return;
         res.locals.sessionToken = token;
         next();
+    };
+    const requireLivePanelCapability = (capability) => async (_req, res, next) => {
+        if (configurationFailure(res))
+            return;
+        const token = String(res.locals.sessionToken || "");
+        if (!token)
+            return res.status(401).json({ success: false, error: { code: "SESSION_REQUIRED", message: "Oturum açmanız gerekiyor." } });
+        const target = new URL(`${config.panelApiBaseUrl.replace(/\/$/, "")}/api/auth/service/me`);
+        const upstream = await fetchPanel(res, target, {
+            method: "GET",
+            headers: { Accept: "application/json", Authorization: `Bearer ${token}`, "x-api-key": config.warehouseApiKey },
+        });
+        if (!upstream)
+            return;
+        const body = await readJson(upstream, res);
+        if (body === null)
+            return;
+        if (!upstream.ok) {
+            res.clearCookie(SESSION_COOKIE, cookieOptions);
+            if (upstream.status >= 500)
+                return res.status(502).json({ success: false, error: { code: "PANEL_AUTH_UNAVAILABLE", message: "Panel kimlik doğrulaması kullanılamıyor." } });
+            return res.status(401).json({ success: false, error: { code: "SESSION_INVALID", message: "Oturum geçersiz veya iptal edilmiş." } });
+        }
+        const user = body.user;
+        const permissions = user?.permissions && typeof user.permissions === "object" && !Array.isArray(user.permissions)
+            ? user.permissions
+            : {};
+        const allowed = user?.role === "admin" || permissions[capability] === true;
+        if (!allowed)
+            return res.status(403).json({ success: false, error: { code: "FORBIDDEN", message: `Bu işlem için ${capability} capability gerekli.` } });
+        res.locals.panelUser = user;
+        return next();
     };
     app.post("/api/auth/login", loginRateLimit, async (req, res) => {
         if (configurationFailure(res))
@@ -211,10 +275,10 @@ export function createWarehouseApp(config) {
                 error: { code: "VALIDATION_ERROR", message: "Kullanıcı adı/e-posta ve şifre zorunludur." },
             });
         }
-        const target = new URL(`${config.panelApiBaseUrl.replace(/\/$/, "")}/api/auth/login`);
+        const target = new URL(`${config.panelApiBaseUrl.replace(/\/$/, "")}/api/auth/service/login`);
         const upstream = await fetchPanel(res, target, {
             method: "POST",
-            headers: { Accept: "application/json", "Content-Type": "application/json" },
+            headers: { Accept: "application/json", "Content-Type": "application/json", "x-api-key": config.warehouseApiKey },
             body: JSON.stringify({ username, password }),
         });
         if (!upstream)
@@ -246,10 +310,10 @@ export function createWarehouseApp(config) {
         if (configurationFailure(res))
             return;
         const token = String(res.locals.sessionToken);
-        const target = new URL(`${config.panelApiBaseUrl.replace(/\/$/, "")}/api/auth/me`);
+        const target = new URL(`${config.panelApiBaseUrl.replace(/\/$/, "")}/api/auth/service/me`);
         const upstream = await fetchPanel(res, target, {
             method: "GET",
-            headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+            headers: { Accept: "application/json", Authorization: `Bearer ${token}`, "x-api-key": config.warehouseApiKey },
         });
         if (!upstream)
             return;
@@ -262,11 +326,26 @@ export function createWarehouseApp(config) {
         }
         return res.json({ success: true, data: safeResponse(body.user, token) });
     });
-    app.post("/api/auth/logout", (_req, res) => {
+    app.post("/api/auth/logout", requireSession, async (_req, res) => {
+        if (configurationFailure(res))
+            return;
+        const token = String(res.locals.sessionToken);
+        const target = new URL(`${config.panelApiBaseUrl.replace(/\/$/, "")}/api/auth/service/logout`);
+        const upstream = await fetchPanel(res, target, {
+            method: "POST",
+            headers: { Accept: "application/json", Authorization: `Bearer ${token}`, "x-api-key": config.warehouseApiKey },
+        });
+        if (!upstream)
+            return;
+        const body = await readJson(upstream, res);
+        if (body === null)
+            return;
+        if (!upstream.ok && upstream.status !== 401)
+            return res.status(upstream.status).json(safeResponse(body, token));
         res.clearCookie(SESSION_COOKIE, cookieOptions);
-        res.json({ success: true, data: null });
+        return res.json({ success: true, data: null });
     });
-    app.get("/api/labels/templates", requireSession, async (req, res) => {
+    app.get("/api/labels/templates", requireSession, requireLivePanelCapability("warehouse:print_labels"), async (req, res) => {
         const purpose = safeQueryText(req.query.purpose, 40);
         const query = purpose ? `?purpose=${encodeURIComponent(purpose)}` : "";
         const upstream = await fetchLabelPrinter(res, `/api/v1/templates${query}`, { headers: { Accept: "application/json" } });
@@ -283,7 +362,7 @@ export function createWarehouseApp(config) {
             return res.status(502).json({ success: false, error: { code: "LABEL_PRINTER_INVALID_RESPONSE", message: "Label Printer geçersiz yanıt verdi." } });
         }
     });
-    app.post("/api/labels/preview", requireSession, async (req, res) => {
+    app.post("/api/labels/preview", requireSession, requireLivePanelCapability("warehouse:print_labels"), async (req, res) => {
         const purpose = safeQueryText(req.body?.purpose, 40);
         const data = req.body?.data && typeof req.body.data === "object" && !Array.isArray(req.body.data) ? req.body.data : {};
         const upstream = await fetchLabelPrinter(res, "/api/v1/render", {
@@ -301,6 +380,23 @@ export function createWarehouseApp(config) {
         }
         return res.status(upstream.status).type(contentType).send(Buffer.from(await upstream.arrayBuffer()));
     });
+    const defaultTemplateSnapshot = async (res, purpose) => {
+        const upstream = await fetchLabelPrinter(res, `/api/v1/templates/default?purpose=${encodeURIComponent(purpose)}`, { headers: { Accept: "application/json" } });
+        if (!upstream)
+            return null;
+        const raw = await upstream.text();
+        if (!upstream.ok) {
+            res.status(upstream.status).type("application/json").send(raw);
+            return null;
+        }
+        try {
+            return JSON.parse(raw);
+        }
+        catch {
+            res.status(502).json({ success: false, error: { code: "LABEL_PRINTER_INVALID_RESPONSE", message: "Label Printer geçersiz şablon snapshot'ı döndürdü." } });
+            return null;
+        }
+    };
     const forward = async (req, res, method, upstreamPath, query, body, binary = false) => {
         if (configurationFailure(res))
             return;
@@ -341,6 +437,139 @@ export function createWarehouseApp(config) {
         });
         return forward(req, res, "GET", "/orders", query);
     });
+    app.get("/api/catalog/v1/products", requireSession, (req, res) => {
+        const query = new URLSearchParams();
+        const catalogType = safeQueryText(req.query.catalog_type, 20);
+        if (catalogType)
+            query.set("catalog_type", catalogType);
+        return forward(req, res, "GET", "/catalog/products", query);
+    });
+    app.get("/api/catalog/v1/uoms", requireSession, (req, res) => forward(req, res, "GET", "/catalog/uoms"));
+    app.get("/api/inventory/v1/products/:id/availability", requireSession, (req, res) => forward(req, res, "GET", `/inventory/products/${encodeURIComponent(String(req.params.id))}/availability`));
+    app.get("/api/inventory/v1/reservations/:id/fulfillment", requireSession, (req, res) => forward(req, res, "GET", `/inventory/reservations/${encodeURIComponent(String(req.params.id))}/fulfillment`));
+    app.get("/api/reconciliation", requireSession, (req, res) => forward(req, res, "GET", "/reconciliation"));
+    app.post("/api/inventory/v1/receipts", requireSession, (req, res) => forward(req, res, "POST", "/inventory/receipts", undefined, {
+        receiptId: safeQueryText(req.body?.receiptId, 200),
+        costSnapshotId: safeQueryText(req.body?.costSnapshotId, 200),
+        receivedAt: safeQueryText(req.body?.receivedAt, 50),
+        location: {
+            id: safeQueryText(req.body?.location?.id, 200),
+            kind: safeQueryText(req.body?.location?.kind, 20),
+        },
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
+    for (const transition of ["pick", "pack"]) {
+        app.post(`/api/inventory/v1/reservations/:id/${transition}`, requireSession, (req, res) => forward(req, res, "POST", `/inventory/reservations/${encodeURIComponent(String(req.params.id))}/${transition}`, undefined, {
+            at: safeQueryText(req.body?.at, 50) || null,
+            idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+        }));
+    }
+    app.post("/api/inventory/v1/reservations/:id/dispatch", requireSession, (req, res) => res.status(409).json({ success: false, error: { code: "PHYSICAL_HANDOFF_REQUIRED",
+            message: "Stok çıkışı yalnız doğrulanmış fiziksel taşıyıcı teslimiyle yapılabilir." } }));
+    app.get("/api/shipping/v1/provider-contracts/geliver", requireSession, (req, res) => forward(req, res, "GET", "/shipping/provider-contracts/geliver"));
+    app.get("/api/shipping/v1/shipments/:id", requireSession, (req, res) => forward(req, res, "GET", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}`));
+    app.get("/api/shipping/v1/reservations/:id/shipment", requireSession, (req, res) => forward(req, res, "GET", `/shipping/reservations/${encodeURIComponent(String(req.params.id))}/shipment`));
+    app.post("/api/shipping/v1/shipments/:id/packages", requireSession, (req, res) => {
+        const packages = Array.isArray(req.body?.packages) ? req.body.packages.slice(0, 50).map((item) => ({
+            packageNumber: Number(item?.packageNumber),
+            recipePackageNumber: item?.recipePackageNumber == null ? null : Number(item.recipePackageNumber),
+            measured: item?.measured ? {
+                lengthMm: Number(item.measured.lengthMm), widthMm: Number(item.measured.widthMm),
+                heightMm: Number(item.measured.heightMm), weightGrams: Number(item.measured.weightGrams),
+            } : null,
+            contents: Array.isArray(item?.contents) ? item.contents.slice(0, 200).map((content) => ({
+                productId: safeQueryText(content?.productId, 200), quantityBaseInt: Number(content?.quantityBaseInt),
+            })) : [],
+        })) : [];
+        return forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/packages`, undefined, {
+            packages, idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+        });
+    });
+    app.post("/api/shipping/v1/shipments/:id/carrier-selection", requireSession, (req, res) => {
+        if (req.body?.cashOnDelivery === true)
+            return res.status(409).json({ success: false, error: { code: "COD_FORBIDDEN", message: "Kapıda ödeme desteklenmiyor." } });
+        return forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/carrier-selection`, undefined, {
+            provider: "GELIVER",
+            carrierCode: safeQueryText(req.body?.carrierCode, 100),
+            serviceCode: safeQueryText(req.body?.serviceCode, 100),
+            cashOnDelivery: false,
+            quote: {
+                quoteId: safeQueryText(req.body?.quote?.quoteId, 200),
+                amountMinor: Number(req.body?.quote?.amountMinor),
+                currency: safeQueryText(req.body?.quote?.currency, 3).toUpperCase(),
+                provenance: {
+                    source: safeQueryText(req.body?.quote?.provenance?.source, 100),
+                    reference: safeQueryText(req.body?.quote?.provenance?.reference, 500),
+                },
+            },
+            idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+        });
+    });
+    app.post("/api/shipping/v1/shipments/:id/booking", requireSession, (req, res) => forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/booking`, undefined, {
+        requestedAt: safeQueryText(req.body?.requestedAt, 50) || null,
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
+    app.post("/api/shipping/v1/shipments/:id/geliver/offers", requireSession, (req, res) => forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/geliver/offers`, undefined, {
+        recipient: {
+            name: safeQueryText(req.body?.recipient?.name, 200), email: safeQueryText(req.body?.recipient?.email, 320),
+            phone: safeQueryText(req.body?.recipient?.phone, 50) || null,
+            address1: safeQueryText(req.body?.recipient?.address1, 500), address2: safeQueryText(req.body?.recipient?.address2, 500) || null,
+            countryCode: safeQueryText(req.body?.recipient?.countryCode, 3).toUpperCase(),
+            cityName: safeQueryText(req.body?.recipient?.cityName, 100), cityCode: safeQueryText(req.body?.recipient?.cityCode, 30),
+            districtName: safeQueryText(req.body?.recipient?.districtName, 100), districtID: safeQueryText(req.body?.recipient?.districtID, 50) || null,
+            zip: safeQueryText(req.body?.recipient?.zip, 30) || null,
+        },
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
+    app.post("/api/shipping/v1/shipments/:id/geliver/refresh", requireSession, (req, res) => forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/geliver/refresh`, undefined, {
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
+    app.post("/api/shipping/v1/shipments/:id/geliver/offers/:offerId/accept", requireSession, (req, res) => forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/geliver/offers/${encodeURIComponent(String(req.params.offerId))}/accept`, undefined, {
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
+    app.post("/api/shipping/v1/shipments/:id/packages/:packageId/print", requireSession, (req, res) => forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/packages/${encodeURIComponent(String(req.params.packageId))}/print`, undefined, {
+        printer_name: safeQueryText(req.body?.printer_name, 160) || null,
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
+    app.post("/api/shipping/v1/shipments/:id/cancel", requireSession, (req, res) => forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/cancel`, undefined, {
+        reason: safeQueryText(req.body?.reason, 500),
+        cancelledAt: safeQueryText(req.body?.cancelledAt, 50) || null,
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
+    app.post("/api/shipping/v1/shipments/:id/handoff", requireSession, (req, res) => forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/handoff`, undefined, {
+        handedOffAt: safeQueryText(req.body?.handedOffAt, 50),
+        handoffEvidence: {
+            kind: safeQueryText(req.body?.handoffEvidence?.kind, 100),
+            reference: safeQueryText(req.body?.handoffEvidence?.reference, 500),
+        },
+        actualCharge: req.body?.actualCharge ? {
+            amountMinor: Number(req.body.actualCharge.amountMinor),
+            currency: safeQueryText(req.body.actualCharge.currency, 3).toUpperCase(),
+            provenance: {
+                source: safeQueryText(req.body.actualCharge.provenance?.source, 100),
+                reference: safeQueryText(req.body.actualCharge.provenance?.reference, 500),
+            },
+        } : undefined,
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
+    app.post("/api/inventory/v1/reservations/:id/discrepancies", requireSession, (req, res) => forward(req, res, "POST", `/inventory/reservations/${encodeURIComponent(String(req.params.id))}/discrepancies`, undefined, {
+        lotId: safeQueryText(req.body?.lotId, 200),
+        locationId: safeQueryText(req.body?.locationId, 200),
+        reason: safeQueryText(req.body?.reason, 500),
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
+    app.get("/api/returns", requireSession, (req, res) => forward(req, res, "GET", "/returns"));
+    app.get("/api/returns/:id", requireSession, (req, res) => forward(req, res, "GET", `/returns/${encodeURIComponent(String(req.params.id))}`));
+    app.post("/api/returns/:id/receipts", requireSession, (req, res) => forward(req, res, "POST", `/returns/${encodeURIComponent(String(req.params.id))}/receipts`, undefined, {
+        lines: Array.isArray(req.body?.lines) ? req.body.lines.slice(0, 100).map((line) => ({
+            returnLineId: safeQueryText(line?.returnLineId, 200),
+            quantityBaseInt: Number(line?.quantityBaseInt),
+            disposition: safeQueryText(line?.disposition, 40),
+            locationId: safeQueryText(line?.locationId, 200) || null,
+        })) : [],
+        receivedAt: safeQueryText(req.body?.receivedAt, 50) || null,
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
     app.get("/api/orders/:id", requireSession, (req, res) => forward(req, res, "GET", `/orders/${encodeURIComponent(String(req.params.id))}`));
     app.get("/api/orders/:id/pick-plan", requireSession, (req, res) => forward(req, res, "GET", `/orders/${encodeURIComponent(String(req.params.id))}/pick-plan`));
     app.get("/api/scan/:code", requireSession, (req, res) => forward(req, res, "GET", `/scan/${encodeURIComponent(String(req.params.code))}`));
@@ -394,6 +623,24 @@ export function createWarehouseApp(config) {
     const safeAdminBody = (body) => body && typeof body === "object" && !Array.isArray(body)
         ? body
         : {};
+    app.get("/api/execution/topology", requireSession, (req, res) => forward(req, res, "GET", "/execution/topology"));
+    app.post("/api/execution/topology", requireSession, (req, res) => forward(req, res, "POST", "/execution/topology", undefined, safeAdminBody(req.body)));
+    app.get("/api/execution/settings", requireSession, (req, res) => forward(req, res, "GET", "/execution/settings"));
+    app.post("/api/execution/settings", requireSession, (req, res) => forward(req, res, "POST", "/execution/settings", undefined, safeAdminBody(req.body)));
+    app.post("/api/execution/receipts/excess-approvals", requireSession, (req, res) => forward(req, res, "POST", "/execution/receipts/excess-approvals", undefined, safeAdminBody(req.body)));
+    app.post("/api/execution/receipts", requireSession, (req, res) => forward(req, res, "POST", "/execution/receipts", undefined, safeAdminBody(req.body)));
+    app.get("/api/execution/packages/:id", requireSession, (req, res) => forward(req, res, "GET", `/execution/packages/${encodeURIComponent(String(req.params.id))}`));
+    app.post("/api/execution/packages/:id/identity", requireSession, (req, res) => forward(req, res, "POST", `/execution/packages/${encodeURIComponent(String(req.params.id))}/identity`, undefined, safeAdminBody(req.body)));
+    app.get("/api/execution/packages/:id/suggestion", requireSession, (req, res) => forward(req, res, "GET", `/execution/packages/${encodeURIComponent(String(req.params.id))}/suggestion`));
+    app.post("/api/execution/packages/:id/place", requireSession, (req, res) => forward(req, res, "POST", `/execution/packages/${encodeURIComponent(String(req.params.id))}/place`, undefined, safeAdminBody(req.body)));
+    app.post("/api/execution/packages/:id/move", requireSession, (req, res) => forward(req, res, "POST", `/execution/packages/${encodeURIComponent(String(req.params.id))}/move`, undefined, safeAdminBody(req.body)));
+    app.post("/api/execution/replenishments/prepare", requireSession, (req, res) => forward(req, res, "POST", "/execution/replenishments/prepare", undefined, safeAdminBody(req.body)));
+    app.get("/api/execution/replenishments", requireSession, (req, res) => forward(req, res, "GET", "/execution/replenishments"));
+    app.post("/api/execution/replenishments/:id/complete", requireSession, (req, res) => forward(req, res, "POST", `/execution/replenishments/${encodeURIComponent(String(req.params.id))}/complete`, undefined, safeAdminBody(req.body)));
+    app.post("/api/execution/discrepancies", requireSession, (req, res) => forward(req, res, "POST", "/execution/discrepancies", undefined, safeAdminBody(req.body)));
+    app.post("/api/execution/counts", requireSession, (req, res) => forward(req, res, "POST", "/execution/counts", undefined, safeAdminBody(req.body)));
+    app.post("/api/execution/counts/:id/approve", requireSession, (req, res) => forward(req, res, "POST", `/execution/counts/${encodeURIComponent(String(req.params.id))}/approve`, undefined, safeAdminBody(req.body)));
+    app.get("/api/execution/products/:id/reconciliation", requireSession, (req, res) => forward(req, res, "GET", `/execution/products/${encodeURIComponent(String(req.params.id))}/reconciliation`));
     app.get("/api/admin/batches", requireSession, (req, res) => forward(req, res, "GET", "/admin/batches"));
     app.post("/api/admin/batches", requireSession, (req, res) => forward(req, res, "POST", "/admin/batches", undefined, safeAdminBody(req.body)));
     app.get("/api/admin/batches/:id", requireSession, (req, res) => forward(req, res, "GET", `/admin/batches/${encodeURIComponent(String(req.params.id))}`));
@@ -434,10 +681,19 @@ export function createWarehouseApp(config) {
         return forward(req, res, "POST", "/admin/packages/claim-next", undefined, body);
     });
     app.get("/api/admin/packages/by-code/:code", requireSession, (req, res) => forward(req, res, "GET", `/admin/packages/by-code/${encodeURIComponent(String(req.params.code))}`));
-    app.post("/api/admin/packages/:id/print", requireSession, (req, res) => forward(req, res, "POST", `/admin/packages/${encodeURIComponent(String(req.params.id))}/print`, undefined, {
-        ...safeAdminBody(req.body),
-        template_purpose: "goods_receipt",
-    }));
+    app.get("/api/admin/packages/:id/print-preview", requireSession, (req, res) => forward(req, res, "GET", `/admin/packages/${encodeURIComponent(String(req.params.id))}/print-preview`));
+    app.post("/api/admin/packages/:id/print", requireSession, async (req, res) => {
+        const templateSnapshot = await defaultTemplateSnapshot(res, "goods_receipt");
+        if (!templateSnapshot)
+            return;
+        return forward(req, res, "POST", `/admin/packages/${encodeURIComponent(String(req.params.id))}/print`, undefined, {
+            claim_token: safeQueryText(req.body?.claim_token, 200) || null,
+            idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+            device_id: safeQueryText(req.body?.device_id, 150),
+            printer_name: safeQueryText(req.body?.printer_name, 160) || null,
+            template_snapshot: templateSnapshot,
+        });
+    });
     app.post("/api/admin/packages/:id/release-receiving", requireSession, (req, res) => forward(req, res, "POST", `/admin/packages/${encodeURIComponent(String(req.params.id))}/release-receiving`, undefined, {
         device_id: safeQueryText(req.body?.device_id, 150),
     }));
@@ -445,11 +701,27 @@ export function createWarehouseApp(config) {
         const query = new URLSearchParams({ limit: String(safePositiveInteger(req.query.limit, 100, 500)) });
         return forward(req, res, "GET", "/admin/print-jobs", query);
     });
-    app.get("/api/admin/locations", requireSession, (req, res) => forward(req, res, "GET", "/admin/locations"));
-    app.post("/api/admin/locations/:id/print", requireSession, (req, res) => forward(req, res, "POST", `/admin/locations/${encodeURIComponent(String(req.params.id))}/print`, undefined, {
-        ...safeAdminBody(req.body),
-        template_purpose: "location",
+    app.post("/api/admin/print-jobs/:id/reprint", requireSession, (req, res) => forward(req, res, "POST", `/admin/print-jobs/${encodeURIComponent(String(req.params.id))}/reprint`, undefined, {
+        reason: safeQueryText(req.body?.reason, 40),
+        explanation: safeQueryText(req.body?.explanation, 1000) || null,
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
     }));
+    app.post("/api/admin/print-jobs/:id/confirm", requireSession, (req, res) => forward(req, res, "POST", `/admin/print-jobs/${encodeURIComponent(String(req.params.id))}/confirm`, undefined, {
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
+    app.get("/api/admin/locations", requireSession, (req, res) => forward(req, res, "GET", "/admin/locations"));
+    app.get("/api/admin/locations/:id/print-preview", requireSession, (req, res) => forward(req, res, "GET", `/admin/locations/${encodeURIComponent(String(req.params.id))}/print-preview`));
+    app.post("/api/admin/locations/:id/print", requireSession, async (req, res) => {
+        const templateSnapshot = await defaultTemplateSnapshot(res, "location");
+        if (!templateSnapshot)
+            return;
+        return forward(req, res, "POST", `/admin/locations/${encodeURIComponent(String(req.params.id))}/print`, undefined, {
+            idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+            device_id: safeQueryText(req.body?.device_id, 150),
+            printer_name: safeQueryText(req.body?.printer_name, 160) || null,
+            template_snapshot: templateSnapshot,
+        });
+    });
     app.get("/api/admin/warehouse-map", requireSession, (req, res) => forward(req, res, "GET", "/admin/warehouse-map"));
     app.get("/api/admin/layouts/placement", requireSession, (req, res) => forward(req, res, "GET", "/admin/layouts/placement"));
     app.post("/api/admin/layouts/import-legacy", requireSession, (req, res) => forward(req, res, "POST", "/admin/layouts/import-legacy", undefined, safeAdminBody(req.body)));

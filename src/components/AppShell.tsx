@@ -1,4 +1,4 @@
-import { Activity, ArrowLeft, Boxes, ClipboardList, Layers3, LayoutDashboard, LogOut, Map, MapPin, Menu, Move, PackageCheck, Settings2, UserRound, WifiOff, X } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, Boxes, ClipboardList, Layers3, LayoutDashboard, LogOut, Map, MapPin, Menu, Move, PackageCheck, RotateCcw, Settings2, Truck, UserRound, WifiOff, X } from "lucide-react";
 import { useState, type PropsWithChildren } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useOnlineStatus } from "../hooks/useOnlineStatus";
@@ -19,6 +19,8 @@ export function AppShell({ children }: PropsWithChildren) {
     { section: "OPERASYON" },
     { label: "Order Picking", to: "/picking-management", icon: ClipboardList },
     { label: "Mal Kabul", to: "/admin/inbound", icon: PackageCheck, permission: "warehouse:receive" as const },
+    { label: "İade Kabul", to: "/returns", icon: RotateCcw, permission: "warehouse:accept_returns" as const },
+    { label: "Sevkiyat", to: "/shipments", icon: Truck, permission: "shipping:manage" as const },
     { label: "Ürün Taşıma", to: "/admin/move", icon: Move, permission: "warehouse:move_stock" as const },
     { section: "DEPO" },
     { label: "Depo Yerleşimi", to: "/warehouse-layout", icon: Layers3, permission: "warehouse:view_map" as const },
@@ -30,6 +32,7 @@ export function AppShell({ children }: PropsWithChildren) {
     { label: "Hareketler", to: "/movements", icon: Activity, permission: "warehouse:view_analytics" as const },
     { label: "Kullanıcı Aktiviteleri", to: "/user-activity", icon: Activity, permission: "warehouse:view_analytics" as const },
     { label: "Kapasite", to: "/capacity", icon: LayoutDashboard, permission: "warehouse:view_analytics" as const },
+    { label: "Sistem Kontrolü", to: "/reconciliation", icon: AlertTriangle, permission: "warehouse:view_analytics" as const },
     { section: "YÖNETİM" },
     { label: "Ayarlar", to: "/admin", icon: Settings2 },
   ];
@@ -96,6 +99,7 @@ export function AppShell({ children }: PropsWithChildren) {
         <nav className="mobile-bottom-nav">
           <NavLink to="/orders"><ClipboardList/><span>Toplama</span></NavLink>
           {hasWarehousePermission(user, "warehouse:receive") && <NavLink to="/admin/inbound"><PackageCheck/><span>Mal Kabul</span></NavLink>}
+          {hasWarehousePermission(user, "warehouse:accept_returns") && <NavLink to="/returns"><RotateCcw/><span>İade</span></NavLink>}
           {hasWarehousePermission(user, "warehouse:move_stock") && <NavLink to="/admin/move"><Move/><span>Taşı</span></NavLink>}
           <NavLink to="/history"><Activity/><span>Geçmiş</span></NavLink>
         </nav>

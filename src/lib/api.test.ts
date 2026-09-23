@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { warehouseApi } from "./api";
+import { catalogApi, warehouseApi } from "./api";
 import { order, orderSummary, pickPlan } from "../test/fixtures";
 
 const response = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(body), {
@@ -20,6 +20,21 @@ describe("Warehouse API client", () => {
     expect(fetch).toHaveBeenCalledWith("/api/orders?page=1&limit=100", expect.objectContaining({
       headers: expect.not.objectContaining({ "x-api-key": expect.anything() }),
     }));
+  });
+
+  it("catalog v1 ürünlerini aynı-origin read-only BFF contract'ından getirir", async () => {
+    vi.mocked(fetch).mockImplementation(() => response({ success: true, contract: "dsdst.catalog-product.v1", data: [{ id: "p-1", sku: "SKU-1", title: "Ürün", catalog_type: "connector", base_uom: { code: "piece", base_quantum: "piece", quantity_scale: 1 }, catalog_version: 1, catalog_version_ref: "catalog-product:p-1:v1", uom_registry_version: "uom-registry:v1", dimensions: { length_mm: null, width_mm: null, height_mm: null, diameter_mm: null }, mass_grams: 10, profile: null }] }));
+    const products = await catalogApi.listProducts("connector");
+    expect(products[0].base_uom.code).toBe("piece");
+    expect(fetch).toHaveBeenCalledWith("/api/catalog/v1/products?catalog_type=connector", expect.objectContaining({
+      headers: expect.not.objectContaining({ "x-api-key": expect.anything() }),
+    }));
+  });
+
+  it("continuous-cut complementary metadata ve base UOM'u değiştirmeden tüketir", async () => {
+    vi.mocked(fetch).mockImplementation(() => response({ success: true, contract: "dsdst.catalog-product.v1", data: [{ id: "fabric-1", sku: "FABRIC-1", title: "Kumaş", catalog_type: "complementary", base_uom: { code: "square_meter", base_quantum: "square_millimeter", quantity_scale: 1_000_000 }, catalog_version: 1, catalog_version_ref: "catalog-product:fabric-1:v1", uom_registry_version: "uom-registry:v1", dimensions: { length_mm: null, width_mm: null, height_mm: null, diameter_mm: null }, mass_grams: null, material_behavior: "continuous_cut", profile: null }] }));
+    const products = await catalogApi.listProducts("complementary");
+    expect(products[0]).toMatchObject({ material_behavior: "continuous_cut", base_uom: { code: "square_meter" } });
   });
 
   it("verify-pick body içinde yalnız ürün ve kodu gönderir", async () => {

@@ -11,10 +11,13 @@ import { LoginPage } from "./pages/LoginPage";
 import { PickHistoryPage } from "./pages/PickHistoryPage";
 import {
   InboundPage, LabelingPage, LocationsPage, MoveStockPage, PlacementPage, PrintJobsPage,
-  StockCountPage, WarehouseAdminPage, LabelTemplatesPage,
+  ReplenishmentPage, StockCountPage, WarehouseAdminPage, LabelTemplatesPage,
 } from "./pages/WarehouseAdminPages";
 import { CapacityPage, DashboardPage, LocationsDesktopPage, MovementsPage, PackagesPage, PickingManagementPage, StockPage, UserActivityPage } from "./pages/WmsDesktopPages";
 import WarehouseLayoutPage from "./pages/WarehouseLayoutPage";
+import ReturnAcceptancePage from "./pages/ReturnAcceptancePage";
+import ShipmentPage from "./pages/ShipmentPage";
+import ReconciliationPage from "./pages/ReconciliationPage";
 
 const WarehouseMapPage = lazy(() => import("./pages/WarehouseMapPage"));
 
@@ -34,9 +37,12 @@ function AuthenticatedApp() {
         <Route path="/history" element={<PickHistoryPage />} />
         <Route path="/admin" element={<WarehouseAdminPage />} />
         <Route path="/admin/inbound" element={<InboundPage />} />
+        <Route path="/returns" element={<ReturnAcceptancePage />} />
+        <Route path="/shipments" element={<ShipmentPage />} />
         <Route path="/admin/labeling" element={<LabelingPage />} />
         <Route path="/admin/placement" element={<PlacementPage />} />
         <Route path="/admin/move" element={<MoveStockPage />} />
+        <Route path="/admin/replenishments" element={<ReplenishmentPage />} />
         <Route path="/admin/locations" element={<LocationsPage />} />
         <Route path="/admin/count" element={<StockCountPage />} />
         <Route path="/admin/prints" element={<PrintJobsPage />} />
@@ -49,6 +55,7 @@ function AuthenticatedApp() {
         <Route path="/user-activity" element={<UserActivityPage />} />
         <Route path="/capacity" element={<CapacityPage />} />
         <Route path="/stock" element={<StockPage />} />
+        <Route path="/reconciliation" element={<ReconciliationPage />} />
         <Route path="/picking-management" element={<PickingManagementPage />} />
         <Route path="/picking" element={<Navigate to="/orders" replace />} />
         <Route path="/receiving" element={<Navigate to="/admin/inbound" replace />} />

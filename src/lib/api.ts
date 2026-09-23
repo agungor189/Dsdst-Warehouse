@@ -18,6 +18,15 @@ import type {
   WarehousePackageListItem,
   WarehousePlacementLayout,
   WarehousePlacementPreview,
+  WarehouseReplenishmentTask,
+  CatalogProductV1,
+  CatalogUomRegistryV1,
+  InventoryAvailabilityV1,
+  InventoryFulfillmentV1,
+  InventoryReservationV1,
+  WarehouseExecutionPackage,
+  WarehouseExecutionLocation,
+  ShipmentV1, GeliverLivePackage,
 } from "../types/warehouse";
 import type { ReceivingLot, ReceivingSession } from "../types/warehouse";
 
@@ -103,7 +112,13 @@ const requestPdf = async (path: string, body: Record<string, unknown>): Promise<
   return response.blob();
 };
 
-export type LabelTemplatePurpose = "goods_receipt" | "location" | "product_package" | "kit" | "shipping" | "custom";
+export type LabelTemplatePurpose = "goods_receipt" | "location";
+export type ReprintReason = "DAMAGED_OUTPUT" | "LOST" | "PRINTER_ERROR" | "OTHER";
+export type PrintJob = Record<string, unknown> & {
+  id: string; purpose: "GOODS_RECEIPT_PACKAGE" | "LOCATION" | "SHIPPING";
+  subject_code: string; status: "QUEUED" | "RENDERED" | "SUBMITTED" | "ACKNOWLEDGED" | "PRINTED_CONFIRMED" | "DELIVERY_UNKNOWN" | "FAILED" | "CANCELLED";
+  attempts: Array<Record<string, unknown>>; history: Array<Record<string, unknown>>;
+};
 
 export const labelApi = {
   async listTemplates(purpose?: LabelTemplatePurpose) {
@@ -167,6 +182,128 @@ export const warehouseApi = {
   },
 };
 
+export const catalogApi = {
+  async listProducts(catalogType?: CatalogProductV1["catalog_type"]) {
+    const query = catalogType ? `?catalog_type=${encodeURIComponent(catalogType)}` : "";
+    return (await request<CatalogProductV1[]>(`/catalog/v1/products${query}`)).data;
+  },
+  async getUoms() {
+    return (await request<CatalogUomRegistryV1>("/catalog/v1/uoms")).data;
+  },
+};
+
+const inventoryOperation = () => crypto.randomUUID();
+
+export const inventoryApi = {
+  async getAvailability(productId: string) {
+    return (await request<InventoryAvailabilityV1>(`/inventory/v1/products/${encodeURIComponent(productId)}/availability`)).data;
+  },
+  async getFulfillment(reservationId: string) {
+    return (await request<InventoryFulfillmentV1>(`/inventory/v1/reservations/${encodeURIComponent(reservationId)}/fulfillment`)).data;
+  },
+  async receive(input: { receiptId: string; costSnapshotId: string; receivedAt: string; location: { id: string; kind: "PICKING" | "RESERVE" } }) {
+    return (await request<Record<string, unknown>>("/inventory/v1/receipts", {
+      method: "POST", body: JSON.stringify({ ...input, idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async markPicked(reservationId: string, at?: string) {
+    return (await request<InventoryReservationV1>(`/inventory/v1/reservations/${encodeURIComponent(reservationId)}/pick`, {
+      method: "POST", body: JSON.stringify({ at, idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async markPacked(reservationId: string, at?: string) {
+    return (await request<InventoryReservationV1>(`/inventory/v1/reservations/${encodeURIComponent(reservationId)}/pack`, {
+      method: "POST", body: JSON.stringify({ at, idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async reportDiscrepancy(reservationId: string, lotId: string, locationId: string, reason: string) {
+    return (await request<InventoryFulfillmentV1>(`/inventory/v1/reservations/${encodeURIComponent(reservationId)}/discrepancies`, {
+      method: "POST", body: JSON.stringify({ lotId, locationId, reason, idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+};
+
+export type WarehouseReconciliationFinding = {
+  id: string; code: string; severity: "INFO" | "WARN" | "CRITICAL"; affectedId: string;
+  expected: unknown; actual: unknown; repairStatus: string; occurrences: number; lastSeenAt: string;
+};
+export const reconciliationApi = {
+  async listStockFindings() {
+    return (await request<WarehouseReconciliationFinding[]>("/reconciliation")).data;
+  },
+};
+
+export const shipmentApi = {
+  async get(shipmentId: string) {
+    return (await request<ShipmentV1>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}`)).data;
+  },
+  async getForReservation(reservationId: string) {
+    return (await request<ShipmentV1>(`/shipping/v1/reservations/${encodeURIComponent(reservationId)}/shipment`)).data;
+  },
+  async definePackages(shipmentId: string, packages: Array<Record<string, unknown>>) {
+    return (await request<ShipmentV1["packages"]>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/packages`, {
+      method: "POST", body: JSON.stringify({ packages, idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async selectCarrier(shipmentId: string, input: { carrierCode: string; serviceCode: string; quoteId: string; quoteAmountMinor: number; currency: string; quoteReference: string }) {
+    return (await request<ShipmentV1>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/carrier-selection`, {
+      method: "POST", body: JSON.stringify({ provider: "GELIVER", carrierCode: input.carrierCode, serviceCode: input.serviceCode,
+        cashOnDelivery: false, quote: { quoteId: input.quoteId, amountMinor: input.quoteAmountMinor, currency: input.currency,
+          provenance: { source: "OPERATOR_GELIVER_QUOTE", reference: input.quoteReference } }, idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async requestBooking(shipmentId: string) {
+    return (await request<{ shipment: ShipmentV1 }>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/booking`, {
+      method: "POST", body: JSON.stringify({ requestedAt: new Date().toISOString(), idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async loadGeliverOffers(shipmentId: string, recipient: { name: string; email: string; phone?: string; address1: string;
+    address2?: string; countryCode: string; cityName: string; cityCode: string; districtName: string; districtID?: string; zip?: string }) {
+    return (await request<GeliverLivePackage[]>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/geliver/offers`, {
+      method: "POST", body: JSON.stringify({ recipient, idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async refreshGeliver(shipmentId: string) {
+    return (await request<GeliverLivePackage[]>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/geliver/refresh`, {
+      method: "POST", body: JSON.stringify({ idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async acceptGeliverOffer(shipmentId: string, offerId: string) {
+    return (await request<ShipmentV1>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/geliver/offers/${encodeURIComponent(offerId)}/accept`, {
+      method: "POST", body: JSON.stringify({ idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async queueNativeLabel(shipmentId: string, packageId: string) {
+    return (await request<PrintJob>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/packages/${encodeURIComponent(packageId)}/print`, {
+      method: "POST", body: JSON.stringify({ idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async cancel(shipmentId: string, reason: string) {
+    return (await request<ShipmentV1>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/cancel`, {
+      method: "POST", body: JSON.stringify({ reason, cancelledAt: new Date().toISOString(), idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+  async confirmHandoff(shipmentId: string, input: { evidenceReference: string; actualChargeMinor?: number; currency?: string; chargeReference?: string }) {
+    return (await request<ShipmentV1>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/handoff`, {
+      method: "POST", body: JSON.stringify({ handedOffAt: new Date().toISOString(),
+        handoffEvidence: { kind: "OPERATOR_CARRIER_HANDOFF", reference: input.evidenceReference },
+        ...(input.actualChargeMinor == null ? {} : { actualCharge: { amountMinor: input.actualChargeMinor,
+          currency: input.currency || "TRY", provenance: { source: "GELIVER_ACTUAL_CHARGE", reference: input.chargeReference || input.evidenceReference } } }),
+        idempotency_key: inventoryOperation() }),
+    })).data;
+  },
+};
+
+export const returnsApi = {
+  async listApproved() { return (await request<any[]>("/returns")).data; },
+  async get(returnId: string) { return (await request<any>(`/returns/${encodeURIComponent(returnId)}`)).data; },
+  async receive(returnId: string, lines: Array<{ returnLineId: string; quantityBaseInt: number; disposition: "SELLABLE" | "DAMAGED" | "MISSING_NOT_RECEIVED"; locationId?: string | null }>, operationId = crypto.randomUUID()) {
+    return (await request<any>(`/returns/${encodeURIComponent(returnId)}/receipts`, {
+      method: "POST", body: JSON.stringify({ lines, receivedAt: new Date().toISOString(), idempotency_key: operationId }),
+    })).data;
+  },
+};
+
 export const authApi = {
   async login(username: string, password: string) {
     return (await request<AuthUser>("/auth/login", {
@@ -192,6 +329,71 @@ const warehouseDeviceId = () => {
   const created = crypto.randomUUID();
   sessionStorage.setItem(key, created);
   return created;
+};
+
+const executionOperation = () => crypto.randomUUID();
+
+export const warehouseExecutionApi = {
+  async getPackage(packageIdOrCode: string) {
+    return (await request<WarehouseExecutionPackage>(`/execution/packages/${encodeURIComponent(packageIdOrCode)}`)).data;
+  },
+  async suggestLocation(packageIdOrCode: string) {
+    return (await request<WarehouseExecutionLocation>(`/execution/packages/${encodeURIComponent(packageIdOrCode)}/suggestion`)).data;
+  },
+  async identifyPackage(packageIdOrCode: string, labelIdentity: string, operationId = executionOperation()) {
+    return (await request<WarehouseExecutionPackage>(`/execution/packages/${encodeURIComponent(packageIdOrCode)}/identity`, {
+      method: "POST", body: JSON.stringify({ labelIdentity, idempotency_key: operationId }),
+    })).data;
+  },
+  async placePackage(packageIdOrCode: string, destinationCode: string, operationId = executionOperation()) {
+    return (await request<{ package: WarehouseExecutionPackage; destination: WarehouseExecutionLocation; onHandBaseInt: number }>(
+      `/execution/packages/${encodeURIComponent(packageIdOrCode)}/place`, {
+        method: "POST", body: JSON.stringify({ destinationCode, scannedDestinationCode: destinationCode, idempotency_key: operationId }),
+      },
+    )).data;
+  },
+  async movePackage(packageIdOrCode: string, destinationCode: string, operationId = executionOperation()) {
+    return (await request<{ package: WarehouseExecutionPackage; destination: WarehouseExecutionLocation; onHandBaseInt: number }>(
+      `/execution/packages/${encodeURIComponent(packageIdOrCode)}/move`, {
+        method: "POST", body: JSON.stringify({ destinationCode, scannedDestinationCode: destinationCode, idempotency_key: operationId }),
+      },
+    )).data;
+  },
+  async recordCount(packageIdOrCode: string, observedQuantityBaseInt: number, reason: string, operationId = executionOperation()) {
+    const countId = crypto.randomUUID();
+    return (await request<{ id: string; packageId: string; expectedQuantityBaseInt: number; observedQuantityBaseInt: number; differenceBaseInt: number; status: "MATCHED" | "PENDING_APPROVAL" }>(
+      "/execution/counts", {
+        method: "POST",
+        body: JSON.stringify({ countId, packageId: packageIdOrCode, observedQuantityBaseInt, reason, idempotency_key: operationId }),
+      },
+    )).data;
+  },
+  async receiveGoods(input: Record<string, unknown>, operationId = executionOperation()) {
+    return (await request<{ id: string; status: string; acceptedQuantityBaseInt: number; damagedQuantityBaseInt: number; shortageQuantityBaseInt: number; excessQuantityBaseInt: number; packages: WarehouseExecutionPackage[] }>("/execution/receipts", {
+      method: "POST", body: JSON.stringify({ ...input, idempotency_key: operationId }),
+    })).data;
+  },
+  async approveExcess(input: { approvalId: string; costSnapshotId: string; maximumAcceptedQuantityBaseInt: number; reason: string }, operationId = executionOperation()) {
+    return (await request<Record<string, unknown>>("/execution/receipts/excess-approvals", {
+      method: "POST", body: JSON.stringify({ ...input, idempotency_key: operationId }),
+    })).data;
+  },
+  async prepareReplenishment(productId: string, operationId = executionOperation()) {
+    return (await request<Record<string, unknown>>("/execution/replenishments/prepare", {
+      method: "POST", body: JSON.stringify({ productId, idempotency_key: operationId }),
+    })).data;
+  },
+  async listReplenishmentTasks() {
+    return (await request<WarehouseReplenishmentTask[]>("/execution/replenishments")).data;
+  },
+  async completeReplenishment(taskId: string, scannedSourcePackageCode: string, destinationCode: string, operationId = executionOperation()) {
+    return (await request<{ id: string; state: "COMPLETED"; lotId: string; sourcePackageId: string }>(
+      `/execution/replenishments/${encodeURIComponent(taskId)}/complete`, {
+        method: "POST",
+        body: JSON.stringify({ scannedSourcePackageCode, destinationCode, scannedDestinationCode: destinationCode, idempotency_key: operationId }),
+      },
+    )).data;
+  },
 };
 
 export const warehouseAdminApi = {
@@ -255,15 +457,18 @@ export const warehouseAdminApi = {
   async getPackage(code: string) {
     return (await request<WarehousePackage>(`/admin/packages/by-code/${encodeURIComponent(code)}`)).data;
   },
+  async getPackagePrintPreview(packageId: string) {
+    return (await request<{ purpose: "GOODS_RECEIPT_PACKAGE"; subjectId: string; subjectCode: string; payload: Record<string, unknown> }>(`/admin/packages/${encodeURIComponent(packageId)}/print-preview`)).data;
+  },
   async queuePrint(packageId: string, claimToken?: string | null) {
-    return post<{ package: WarehousePackage; job: Record<string, unknown>; idempotent: boolean }>(`/admin/packages/${encodeURIComponent(packageId)}/print`, {
+    return post<PrintJob>(`/admin/packages/${encodeURIComponent(packageId)}/print`, {
       claim_token: claimToken || undefined,
       idempotency_key: crypto.randomUUID(),
       device_id: warehouseDeviceId(),
     });
   },
   async queueLocationPrint(locationId: string) {
-    return post<Record<string, unknown>>(`/admin/locations/${encodeURIComponent(locationId)}/print`, {
+    return post<PrintJob>(`/admin/locations/${encodeURIComponent(locationId)}/print`, {
       idempotency_key: crypto.randomUUID(),
       device_id: warehouseDeviceId(),
     });
@@ -271,8 +476,17 @@ export const warehouseAdminApi = {
   async releaseReceivingPackage(packageId: string) {
     return post<WarehousePackage>(`/admin/packages/${encodeURIComponent(packageId)}/release-receiving`, { device_id: warehouseDeviceId() });
   },
-  async listPrintJobs() { return (await request<Array<Record<string, unknown>>>("/admin/print-jobs?limit=200")).data; },
+  async listPrintJobs() { return (await request<PrintJob[]>("/admin/print-jobs?limit=200")).data; },
+  async reprint(jobId: string, reason: ReprintReason, explanation?: string) {
+    return post<PrintJob>(`/admin/print-jobs/${encodeURIComponent(jobId)}/reprint`, { reason, explanation, idempotency_key: crypto.randomUUID() });
+  },
+  async confirmPrinted(jobId: string) {
+    return post<PrintJob>(`/admin/print-jobs/${encodeURIComponent(jobId)}/confirm`, { idempotency_key: crypto.randomUUID() });
+  },
   async listLocations() { return (await request<WarehouseLocation[]>("/admin/locations")).data; },
+  async getLocationPrintPreview(locationId: string) {
+    return (await request<{ purpose: "LOCATION"; subjectId: string; subjectCode: string; payload: Record<string, unknown> }>(`/admin/locations/${encodeURIComponent(locationId)}/print-preview`)).data;
+  },
   async suggestLocation(packageId?: string) { return (await request<WarehouseLocation>(`/admin/locations/suggestion${packageId ? `?package_id=${encodeURIComponent(packageId)}` : ""}`)).data; },
   async getReceivingLocation(packageId: string) { return (await request<WarehouseLocation>(`/admin/packages/${encodeURIComponent(packageId)}/receiving-location`)).data; },
   async createLocation(input: Record<string, unknown>) { return post<WarehouseLocation>("/admin/locations", input); },
@@ -285,8 +499,6 @@ export const warehouseAdminApi = {
   async countPackage(packageCode: string, countedQuantity: number, note?: string) {
     return post<{ package: WarehousePackage }>("/admin/stock-counts", { package_code: packageCode, counted_quantity: countedQuantity, note, idempotency_key: crypto.randomUUID() });
   },
-  async listTemplates() { return (await request<Array<Record<string, unknown>>>("/admin/label-templates")).data; },
-  async saveTemplate(input: Record<string, unknown>) { return post<Record<string, unknown>>("/admin/label-templates", input); },
 };
 
 export const getErrorMessage = (error: unknown) =>

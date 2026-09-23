@@ -9,6 +9,7 @@ export interface AuthUser {
 }
 
 export type WarehousePermission =
+  | "warehouse:pick_orders"
   | "warehouse:receive"
   | "warehouse:manage_receiving_sessions"
   | "warehouse:print_labels"
@@ -16,9 +17,60 @@ export type WarehousePermission =
   | "warehouse:move_stock"
   | "warehouse:manage_locations"
   | "warehouse:count_stock"
+  | "warehouse:accept_returns"
+  | "shipping:manage"
+  | "shipping:dispatch"
   | "warehouse:edit_label_templates"
   | "warehouse:view_map"
   | "warehouse:view_analytics";
+
+export type ShipmentState = "PREPARING" | "CARRIER_SELECTED" | "BOOKED" | "LABEL_READY" | "HANDED_OFF" | "DISPATCHED" | "CANCELLED" | "EXCEPTION";
+
+export interface ShipmentV1 {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  reservationId: string;
+  state: ShipmentState;
+  packageCount: number;
+  requiredContents: Array<{ productId: string; sku: string; title: string; quantityBaseInt: number; baseUomCode: string }>;
+  recipient: null | { name: string; email: string; phone: string | null; address1: string; address2: string | null;
+    countryCode: string; cityName: string; cityCode: string; districtName: string; districtID: string | null; zip: string | null };
+  packages: Array<{
+    id: string;
+    packageNumber: number;
+    measurementSource: "MEASURED" | "RECIPE_ESTIMATE";
+    dimensionsMm: { length: number; width: number; height: number };
+    weightGrams: number;
+    contents: Array<{ productId: string; quantityBaseInt: number }>;
+    booking: null | { providerShipmentId: string; providerTransactionId: string | null; barcode: string | null;
+      carrierCode: string; serviceCode: string; trackingNumber: string | null; trackingUrl: string | null };
+    label: null | { reference: string; responsiveReference: string | null; sha256: string | null; mediaType: string | null; providerNative: true };
+  }>;
+  carrierSelection: null | {
+    provider: "GELIVER";
+    carrierCode: string;
+    serviceCode: string;
+    quote: { id: string; amount?: string; amountMinor?: number; currency: string; provenance: unknown };
+  };
+  handedOffAt: string | null;
+  dispatchedAt: string | null;
+}
+
+export interface GeliverLivePackage {
+  providerShipmentId: string;
+  packageId: string;
+  providerOrderNumber: string;
+  createState: string;
+  bookingState: string | null;
+  providerTransactionId: string | null;
+  barcode: string | null;
+  selectedOffer: null | { id: string; carrier: string; service: string; amount: string; currency: string };
+  offers: Array<{ id: string; carrier: string; service: string; amount: string; currency: string;
+    amountLocal: string | null; currencyLocal: string | null; estimatedArrivalAt: string | null; durationTerms: string | null }>;
+  tracking: { number: string | null; url: string | null; stateCode: string | null };
+  label: null | { url: string; responsiveUrl: string | null; fileType: string | null; artifactSha256: string | null };
+}
 
 export interface WarehouseLayoutObject {
   id: string;
@@ -251,6 +303,64 @@ export interface WarehousePackage {
   placed_by_username?: string | null;
 }
 
+export interface WarehouseExecutionPackage {
+  id: string;
+  code: string;
+  receiptId: string;
+  inventoryLotId: string | null;
+  productId: string;
+  supplierLotCode: string;
+  purchaseOrderId: string;
+  purchaseLineId: string;
+  costSnapshotId: string;
+  baseUomCode: string;
+  initialQuantityBaseInt: number;
+  remainingQuantityBaseInt: number;
+  targetQuantityBaseInt: number;
+  weightGrams: number;
+  disposition: "ACCEPTED" | "DAMAGED";
+  labelIdentity: string | null;
+  status: "RECEIVED" | "LABELED" | "PICKING" | "RESERVE" | "QUARANTINE" | "DISCREPANCY";
+  currentSlotId: string | null;
+  currentLocationCode: string | null;
+}
+
+export interface WarehouseExecutionLocation {
+  id: string;
+  code: string;
+  rackCode: string;
+  levelNumber: number;
+  positionNumber: number;
+  depthCode: string;
+  depthIndex: number;
+  isFront: boolean;
+  role: "PICKING" | "RESERVE" | "MIXED" | "QUARANTINE";
+  allowMixedSku: boolean;
+  allowMixedLot: boolean;
+  maxWeightGrams: number | null;
+  placementPriority: number;
+  lastResort: boolean;
+  heavyPenalty: number;
+}
+
+export interface WarehouseReplenishmentTask {
+  id: string;
+  state: "LOW_WATCH" | "PREPARE_REPLENISHMENT" | "CRITICAL_NO_RESERVE" | "STOCK_DISCREPANCY";
+  productId: string;
+  sku: string;
+  lotId: string;
+  pickPackageId: string | null;
+  pickPackageCode: string | null;
+  sourcePackageId: string | null;
+  sourcePackageCode: string | null;
+  targetSlotId: string | null;
+  targetLocationCode: string | null;
+  thresholdPct: number;
+  currentPct: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ReceivingPlacedPackage {
   package_id: string;
   package_code: string;
@@ -339,6 +449,38 @@ export interface WarehouseOrder {
   updated_at: string;
   picker: WarehousePicker | null;
   items: SaleItem[];
+}
+
+export interface InventoryAvailabilityV1 {
+  productId: string;
+  baseUomCode: string;
+  onHandBaseInt: number;
+  reservedBaseInt: number;
+  availableBaseInt: number;
+}
+
+export interface InventoryFulfillmentRequirementV1 {
+  lotId: string;
+  productId: string;
+  quantityBaseInt: number;
+  state: "READY_AT_PICKING" | "REPLENISH_SAME_LOT" | "STOCK_DISCREPANCY";
+  pickingQuantityBaseInt: number;
+  reserveQuantityBaseInt: number;
+  replenishmentQuantityBaseInt: number;
+}
+
+export interface InventoryFulfillmentV1 {
+  reservationId: string;
+  status: "ACTIVE" | "PICKED" | "PACKED" | "RELEASED" | "DISPATCHED" | "STOCK_DISCREPANCY";
+  requirements: InventoryFulfillmentRequirementV1[];
+}
+
+export interface InventoryReservationV1 {
+  id: string;
+  orderId: string;
+  status: InventoryFulfillmentV1["status"];
+  shipmentId: string | null;
+  allocations: Array<{ lotId: string; productId: string; quantityBaseInt: number }>;
 }
 
 export interface PickItem {
@@ -478,4 +620,38 @@ export interface PickHistoryFilters {
   product_name?: string;
   order_number?: string;
   status?: PickSessionStatus;
+}
+export type CatalogUomCode = "piece" | "meter" | "square_meter" | "kg" | "roll" | "package" | "box" | "millimeter" | "centimeter" | "gram";
+
+export interface CatalogProductV1 {
+  id: string;
+  sku: string;
+  title: string;
+  catalog_type: "product" | "profile" | "connector" | "cap" | "wheel" | "complementary";
+  base_uom: { code: CatalogUomCode; base_quantum: string; quantity_scale: number };
+  catalog_version: number;
+  catalog_version_ref: string;
+  uom_registry_version: string;
+  dimensions: { length_mm: number | null; width_mm: number | null; height_mm: number | null; diameter_mm: number | null };
+  mass_grams: number | null;
+  material_behavior: "continuous_cut" | null;
+  profile: null | {
+    material: string;
+    form: string;
+    width_mm: string | null;
+    height_mm: string | null;
+    diameter_mm: string | null;
+    wall_thickness_mm: string;
+    width_micrometers: number | null;
+    height_micrometers: number | null;
+    diameter_micrometers: number | null;
+    wall_thickness_micrometers: number;
+    standard_purchase_lengths_mm: number[];
+    custom_length_allowed: boolean;
+  };
+}
+
+export interface CatalogUomRegistryV1 {
+  registry_version: string;
+  units: Array<{ code: CatalogUomCode; dimension: string; base_quantum: string; quantity_scale: number; registry_version: string }>;
 }

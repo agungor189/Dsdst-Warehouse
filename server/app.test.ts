@@ -3,12 +3,17 @@ import express, { type RequestHandler } from "express";
 import type { Server } from "node:http";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createWarehouseApp } from "./app.js";
+import { createWarehouseApp as createWarehouseAppImplementation, type WarehouseBffConfig } from "./app.js";
 
 const SECRET = "warehouse-secret-that-must-never-leak";
 const SESSION = "test-panel-jwt";
 const sessionCookie = `warehouse_session=${SESSION}`;
+const TRUSTED_ORIGIN = "https://warehouse.example";
 const servers: Server[] = [];
+const createWarehouseApp = (config: WarehouseBffConfig) => createWarehouseAppImplementation({
+  ...config,
+  allowedOrigins: config.allowedOrigins ?? [TRUSTED_ORIGIN],
+});
 
 const startPanel = async (handler: RequestHandler) => {
   const panel = express();
@@ -49,6 +54,176 @@ describe("Warehouse BFF", () => {
       path: "/api/warehouse/v1/orders",
       query: { page: "2", limit: "100" },
     });
+  });
+
+  it("versioned catalog contract'ını salt-okunur olarak Panel'e iletir", async () => {
+    const received: { path?: string; authorization?: string; key?: string } = {};
+    const panelUrl = await startPanel((req, res) => {
+      received.path = req.path;
+      received.authorization = req.header("authorization");
+      received.key = req.header("x-api-key");
+      res.json({ success: true, contract: "dsdst.catalog-product.v1", data: [{ id: "p-1", sku: "SKU-1", base_uom: { code: "piece" }, catalog_version_ref: "catalog-product:p-1:v1" }] });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .get("/api/catalog/v1/products?catalog_type=connector").set("Cookie", sessionCookie);
+    expect(response.status).toBe(200);
+    expect(response.body.contract).toBe("dsdst.catalog-product.v1");
+    expect(received).toEqual({ path: "/api/warehouse/v1/catalog/products", authorization: `Bearer ${SESSION}`, key: SECRET });
+  });
+
+  it("V2-07 inventory fulfillment contract'ını salt-okunur ve canlı Panel kaynağından iletir", async () => {
+    const received: { path?: string; authorization?: string; key?: string } = {};
+    const panelUrl = await startPanel((req, res) => {
+      received.path = req.path;
+      received.authorization = req.header("authorization");
+      received.key = req.header("x-api-key");
+      res.json({ success: true, contract: "dsdst.inventory-fulfillment.v1", data: { reservationId: "res-1", status: "ACTIVE", requirements: [{ lotId: "lot-old", state: "REPLENISH_SAME_LOT" }] } });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .get("/api/inventory/v1/reservations/res-1/fulfillment").set("Cookie", sessionCookie);
+    expect(response.status).toBe(200);
+    expect(response.body.data.requirements[0]).toEqual({ lotId: "lot-old", state: "REPLENISH_SAME_LOT" });
+    expect(received).toEqual({ path: "/api/warehouse/v1/inventory/reservations/res-1/fulfillment", authorization: `Bearer ${SESSION}`, key: SECRET });
+  });
+
+  it("legacy inventory dispatch is closed before physical carrier handoff", async () => {
+    let called = false;
+    const panelUrl = await startPanel((req, res) => {
+      called = true;
+      res.status(500).end();
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .post("/api/inventory/v1/reservations/res-1/dispatch")
+      .set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
+      .send({ shipmentId: "ship-1", dispatchedAt: "2026-09-20T12:00:00.000Z", idempotency_key: "dispatch-op", central_stock: -99, role: "admin" });
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe("PHYSICAL_HANDOFF_REQUIRED");
+    expect(called).toBe(false);
+  });
+
+  it("V2-13 handoff identity/evidence/actual charge are whitelisted to the Panel-owned gateway", async () => {
+    let received: { path?: string; body?: unknown } = {};
+    const panelUrl = await startPanel((req, res) => {
+      received = { path: req.path, body: req.body };
+      res.json({ success: true, contract: "dsdst.shipment.v1", data: { id: "ship-1", state: "DISPATCHED" } });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .post("/api/shipping/v1/shipments/ship-1/handoff")
+      .set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
+      .send({ handedOffAt: "2026-09-23T12:00:00.000Z", handoffEvidence: { kind: "SCAN", reference: "dock-7", unsafe: "drop" },
+        actualCharge: { amountMinor: 8750, currency: "try", provenance: { source: "invoice", reference: "inv-7", secret: "drop" } },
+        idempotency_key: "handoff-op", central_stock: -99, role: "admin" });
+    expect(response.status).toBe(200);
+    expect(received).toEqual({ path: "/api/warehouse/v1/shipping/shipments/ship-1/handoff", body: {
+      handedOffAt: "2026-09-23T12:00:00.000Z", handoffEvidence: { kind: "SCAN", reference: "dock-7" },
+      actualCharge: { amountMinor: 8750, currency: "TRY", provenance: { source: "invoice", reference: "inv-7" } },
+      idempotency_key: "handoff-op",
+    } });
+  });
+
+  it("V2-13 rejects COD locally and does not call Panel", async () => {
+    let called = false;
+    const panelUrl = await startPanel((_req, res) => { called = true; res.status(500).end(); });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .post("/api/shipping/v1/shipments/ship-1/carrier-selection")
+      .set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
+      .send({ cashOnDelivery: true });
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe("COD_FORBIDDEN");
+    expect(called).toBe(false);
+  });
+
+  it("V2-13 forwards recipient-only live Geliver offer flow, selected offer, refresh, and pre-handoff cancel", async () => {
+    const received: Array<{ method: string; path: string; body: any }> = [];
+    const panelUrl = await startPanel((req, res) => {
+      received.push({ method: req.method, path: req.path, body: req.body });
+      res.json({ success: true, contract: "dsdst.geliver-live-offers.v2", data: [] });
+    });
+    const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET });
+    const headers = { Cookie: sessionCookie, Origin: TRUSTED_ORIGIN };
+    await request(app).post("/api/shipping/v1/shipments/ship-1/geliver/offers").set(headers).send({
+      recipient: { name: "Customer", email: "customer@example.test", phone: "555", address1: "Address 1", address2: "Address 2",
+        countryCode: "tr", cityName: "Istanbul", cityCode: "34", districtName: "Kadikoy", districtID: "1", zip: "34710",
+        providerShipmentId: "must-drop", unsafe: "must-drop" }, idempotency_key: "offers-op", carrierCode: "must-drop",
+    }).expect(200);
+    await request(app).post("/api/shipping/v1/shipments/ship-1/geliver/offers/offer-1/accept").set(headers)
+      .send({ idempotency_key: "accept-op", providerTransactionId: "must-drop" }).expect(200);
+    await request(app).post("/api/shipping/v1/shipments/ship-1/geliver/refresh").set(headers).send({ idempotency_key: "refresh-op" }).expect(200);
+    await request(app).post("/api/shipping/v1/shipments/ship-1/cancel").set(headers)
+      .send({ reason: "CUSTOMER_REQUEST", cancelledAt: "2026-09-23T13:00:00.000Z", idempotency_key: "cancel-op", providerShipmentId: "drop" }).expect(200);
+    expect(received).toEqual([
+      { method: "POST", path: "/api/warehouse/v1/shipping/shipments/ship-1/geliver/offers", body: { recipient: {
+        name: "Customer", email: "customer@example.test", phone: "555", address1: "Address 1", address2: "Address 2",
+        countryCode: "TR", cityName: "Istanbul", cityCode: "34", districtName: "Kadikoy", districtID: "1", zip: "34710",
+      }, idempotency_key: "offers-op" } },
+      { method: "POST", path: "/api/warehouse/v1/shipping/shipments/ship-1/geliver/offers/offer-1/accept", body: { idempotency_key: "accept-op" } },
+      { method: "POST", path: "/api/warehouse/v1/shipping/shipments/ship-1/geliver/refresh", body: { idempotency_key: "refresh-op" } },
+      { method: "POST", path: "/api/warehouse/v1/shipping/shipments/ship-1/cancel", body: {
+        reason: "CUSTOMER_REQUEST", cancelledAt: "2026-09-23T13:00:00.000Z", idempotency_key: "cancel-op",
+      } },
+    ]);
+  });
+
+  it("V2-08 warehouse execution commands are forwarded to Panel without local inventory authority", async () => {
+    let received: { path?: string; body?: unknown; authorization?: string; key?: string } = {};
+    const panelUrl = await startPanel((req, res) => {
+      received = { path: req.path, body: req.body, authorization: req.header("authorization"), key: req.header("x-api-key") };
+      res.json({ success: true, contract: "dsdst.warehouse-execution.v1", data: { package: { id: "pkg-1" }, onHandBaseInt: 10 }, idempotent: false });
+    });
+    const body = { destinationCode: "A1-K1-P1-FRONT", scannedDestinationCode: "A1-K1-P1-FRONT", idempotency_key: "place-op" };
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .post("/api/execution/packages/pkg-1/place")
+      .set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN).send(body);
+    expect(response.status).toBe(200);
+    expect(response.body.contract).toBe("dsdst.warehouse-execution.v1");
+    expect(received).toEqual({
+      path: "/api/warehouse/v1/execution/packages/pkg-1/place",
+      body,
+      authorization: `Bearer ${SESSION}`,
+      key: SECRET,
+    });
+  });
+
+  it("V2-10 return acceptance preserves operation identity and remains a Panel-owned command", async () => {
+    const received: Array<{ method: string; path: string; body: any }> = [];
+    const panelUrl = await startPanel((req, res) => {
+      received.push({ method: req.method, path: req.path, body: req.body });
+      res.json({ success: true, contract: "dsdst.warehouse-return-acceptance.v1", data: req.method === "GET" ? [] : { id: "return-1" } });
+    });
+    const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET, allowedOrigins: [TRUSTED_ORIGIN] });
+    const list = await request(app).get("/api/returns").set("Cookie", sessionCookie);
+    expect(list.status).toBe(200);
+    const body = { lines: [{ returnLineId: "line-1", quantityBaseInt: 1, disposition: "DAMAGED", locationId: "Q1" }], receivedAt: "2026-09-23T10:00:00.000Z", idempotency_key: "return-op-1" };
+    const receipt = await request(app).post("/api/returns/return-1/receipts").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN).send(body);
+    expect(receipt.status).toBe(200);
+    expect(received).toEqual([
+      { method: "GET", path: "/api/warehouse/v1/returns", body: undefined },
+      { method: "POST", path: "/api/warehouse/v1/returns/return-1/receipts", body },
+    ]);
+  });
+
+  it("pending replenishments and scanned same-lot completion stay on the Panel execution contract", async () => {
+    const received: Array<{ method: string; path: string; body: unknown }> = [];
+    const panelUrl = await startPanel((req, res) => {
+      received.push({ method: req.method, path: req.path, body: req.body });
+      res.json({ success: true, contract: "dsdst.warehouse-replenishment-tasks.v1", data: [] });
+    });
+    const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET });
+    const list = await request(app).get("/api/execution/replenishments").set("Cookie", sessionCookie);
+    const completeBody = {
+      scannedSourcePackageCode: "RESERVE-PKG-1",
+      destinationCode: "A1-K1-P2-FRONT",
+      scannedDestinationCode: "A1-K1-P2-FRONT",
+      idempotency_key: "replenish-op",
+    };
+    const complete = await request(app).post("/api/execution/replenishments/task-1/complete")
+      .set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN).send(completeBody);
+    expect(list.status).toBe(200);
+    expect(complete.status).toBe(200);
+    expect(received).toEqual([
+      { method: "GET", path: "/api/warehouse/v1/execution/replenishments", body: undefined },
+      { method: "POST", path: "/api/warehouse/v1/execution/replenishments/task-1/complete", body: completeBody },
+    ]);
   });
 
   it("eksik server API key için gizli bilgi içermeyen 503 döner", async () => {
@@ -138,9 +313,41 @@ describe("Warehouse BFF", () => {
     expect(panelRequest).not.toHaveBeenCalled();
   });
 
+  it("cookie-auth unsafe isteklerde eksik, cross-origin ve same-site farklı origin'i reddeder", async () => {
+    const panelRequest = vi.fn((_req, res) => res.json({ success: true, data: { id: "order-1" } }));
+    const panelUrl = await startPanel(panelRequest);
+    const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET, trustProxyHops: 1, allowedOrigins: [] });
+    const unsafe = () => request(app).post("/api/orders/order-1/start")
+      .set("Cookie", sessionCookie)
+      .set("Host", "warehouse.example")
+      .set("X-Forwarded-Proto", "https")
+      .send({});
+
+    const missing = await unsafe();
+    expect(missing.status).toBe(403);
+    expect(missing.body.error.code).toBe("CSRF_FORBIDDEN");
+
+    const crossOrigin = await unsafe().set("Origin", "https://attacker.example");
+    expect(crossOrigin.status).toBe(403);
+    expect(crossOrigin.body.error.code).toBe("CSRF_FORBIDDEN");
+
+    const invalidOrigin = await unsafe().set("Origin", "null");
+    expect(invalidOrigin.status).toBe(403);
+    expect(invalidOrigin.body.error.code).toBe("CSRF_FORBIDDEN");
+
+    const sameSiteDifferentOrigin = await unsafe().set("Origin", "https://warehouse.example:444");
+    expect(sameSiteDifferentOrigin.status).toBe(403);
+    expect(sameSiteDifferentOrigin.body.error.code).toBe("CSRF_FORBIDDEN");
+
+    const trusted = await unsafe().set("Origin", "https://warehouse.example");
+    expect(trusted.status).toBe(200);
+    expect(panelRequest).toHaveBeenCalledTimes(1);
+  });
+
   it("panel giriş tokenını HttpOnly cookie yapar ve response içinde göstermez", async () => {
     const panelUrl = await startPanel((req, res) => {
-      expect(req.path).toBe("/api/auth/login");
+      expect(req.path).toBe("/api/auth/service/login");
+      expect(req.header("x-api-key")).toBe(SECRET);
       res.json({ success: true, token: SESSION, user: { id: "user-1", username: "Alper", role: "admin", must_change_password: false } });
     });
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
@@ -191,6 +398,7 @@ describe("Warehouse BFF", () => {
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
       .post("/api/orders/o1/verify-pick")
       .set("Cookie", sessionCookie)
+      .set("Origin", TRUSTED_ORIGIN)
       .send({ product_id: "p1", code: "SKU-1", admin: true });
     expect(response.status).toBe(200);
     expect(receivedBody).toEqual({ product_id: "p1", code: "SKU-1" });
@@ -205,6 +413,7 @@ describe("Warehouse BFF", () => {
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
       .post("/api/admin/packages/claim-next")
       .set("Cookie", sessionCookie)
+      .set("Origin", TRUSTED_ORIGIN)
       .send({ supplier_code: " SUP-1 ", role: "admin", x_api_key: "leak" });
     expect(response.status).toBe(200);
     expect(received).toEqual({
@@ -224,6 +433,7 @@ describe("Warehouse BFF", () => {
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
       .post("/api/admin/receiving/sessions")
       .set("Cookie", sessionCookie)
+      .set("Origin", TRUSTED_ORIGIN)
       .send({ lot_number: " LOT-1 ", device_id: " phone-1 ", supplier_code: "leak", role: "admin" });
     expect(response.status).toBe(200);
     expect(received).toEqual({
@@ -239,7 +449,7 @@ describe("Warehouse BFF", () => {
       res.json({ success: true, data: { valid: true, preview_hash: "hash" } });
     });
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
-      .post("/api/admin/layouts/placement/preview").set("Cookie", sessionCookie)
+      .post("/api/admin/layouts/placement/preview").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
       .send({ source_filename: " layout.csv ", csv_text: "sku,pick_face_location\nSKU-1,A1-K1-P1", active: true, created_by: "attacker" });
     expect(response.status).toBe(200);
     expect(received).toEqual({
@@ -256,7 +466,7 @@ describe("Warehouse BFF", () => {
       res.status(201).json({ success: true, data: { id: "layout-1" } });
     });
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
-      .post("/api/admin/layouts/import-legacy").set("Cookie", sessionCookie).send(layout);
+      .post("/api/admin/layouts/import-legacy").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN).send(layout);
     expect(response.status).toBe(201);
     expect(received).toEqual({ path: "/api/warehouse/v1/admin/layouts/import-legacy", body: layout });
   });
@@ -292,7 +502,7 @@ describe("Warehouse BFF", () => {
     let received: { path?: string; body?: unknown } = {};
     const panelUrl = await startPanel((req, res) => { received = { path: req.path, body: req.body }; res.json({ success: true, data: {} }); });
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
-      .post("/api/admin/packages/package-1/release-receiving").set("Cookie", sessionCookie)
+      .post("/api/admin/packages/package-1/release-receiving").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
       .send({ device_id: " phone-1 ", user_id: "other-user", status: "EXPECTED" });
     expect(response.status).toBe(200);
     expect(received).toEqual({
@@ -339,7 +549,13 @@ describe("Warehouse BFF", () => {
       received = { path: req.path, query: req.query, key: req.header("x-api-key") };
       res.json({ templates: [{ id: "receipt-v2", purpose: "goods_receipt" }] });
     });
-    const response = await request(createWarehouseApp({ labelPrinterBaseUrl: labelUrl, labelPrinterApiKey: "label-secret" }))
+    const panelUrl = await startPanel((req, res) => {
+      expect(req.path).toBe("/api/auth/service/me");
+      expect(req.header("authorization")).toBe(`Bearer ${SESSION}`);
+      expect(req.header("x-api-key")).toBe(SECRET);
+      res.json({ success: true, user: { id: "user-1", role: "user", permissions: { "warehouse:print_labels": true } } });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET, labelPrinterBaseUrl: labelUrl, labelPrinterApiKey: "label-secret" }))
       .get("/api/labels/templates?purpose=goods_receipt").set("Cookie", sessionCookie);
     expect(response.status).toBe(200);
     expect(response.body.data[0].id).toBe("receipt-v2");
@@ -354,8 +570,9 @@ describe("Warehouse BFF", () => {
       res.set("X-Label-Template-Purpose", "location");
       res.type("application/pdf").send(Buffer.from("%PDF-preview"));
     });
-    const response = await request(createWarehouseApp({ labelPrinterBaseUrl: labelUrl }))
-      .post("/api/labels/preview").set("Cookie", sessionCookie)
+    const panelUrl = await startPanel((_req, res) => res.json({ success: true, user: { id: "user-1", role: "admin", permissions: {} } }));
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET, labelPrinterBaseUrl: labelUrl }))
+      .post("/api/labels/preview").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
       .send({ purpose: "location", data: { Lokasyon: "A1-K1-P1" }, unsafe: true });
     expect(response.status).toBe(200);
     expect(response.headers["content-type"]).toContain("application/pdf");
@@ -364,20 +581,56 @@ describe("Warehouse BFF", () => {
     expect(receivedBody).toEqual({ purpose: "location", data: { Lokasyon: "A1-K1-P1" } });
   });
 
-  it("paket ve lokasyon baskısında purpose değerini istemciden bağımsız sabitler", async () => {
+  it.each([
+    [undefined, "missing"],
+    [`${SESSION}-fake`, "fake"],
+    [`${SESSION}-revoked`, "revoked"],
+  ])("Label proxy %s human session için 401 döner", async (token) => {
+    const labelRequest = vi.fn((_req, res) => res.json({ templates: [] }));
+    const labelUrl = await startPanel(labelRequest);
+    const panelUrl = await startPanel((_req, res) => res.status(401).json({ success: false, error: { code: "UNAUTHORIZED" } }));
+    const call = request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET, labelPrinterBaseUrl: labelUrl }))
+      .get("/api/labels/templates");
+    if (token) call.set("Cookie", `warehouse_session=${token}`);
+    const response = await call;
+    expect(response.status).toBe(401);
+    expect(labelRequest).not.toHaveBeenCalled();
+  });
+
+  it("Label proxy service key tek başına veya eksik human capability ile çalışmaz", async () => {
+    const labelRequest = vi.fn((_req, res) => res.json({ templates: [] }));
+    const labelUrl = await startPanel(labelRequest);
+    const panelUrl = await startPanel((_req, res) => res.json({ success: true, user: { id: "user-1", role: "user", permissions: {} } }));
+    const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET, labelPrinterBaseUrl: labelUrl });
+    expect((await request(app).get("/api/labels/templates").set("x-api-key", SECRET)).status).toBe(401);
+    expect((await request(app).get("/api/labels/templates").set("Cookie", sessionCookie)).status).toBe(403);
+    expect(labelRequest).not.toHaveBeenCalled();
+  });
+
+  it("paket ve lokasyon baskısında L'nin exact template snapshot'ını P'ye iletir", async () => {
     const received: Array<{ path: string; body: unknown }> = [];
+    const labelUrl = await startPanel((req, res) => {
+      const purpose = String(req.query.purpose);
+      res.json({ id: `${purpose}-v3`, name: purpose, purpose, version: 3, contentHash: "a".repeat(64),
+        width: 100, height: purpose === "goods_receipt" ? 150 : 50,
+        elements: [{ id: "barcode", type: "barcode", value: purpose === "goods_receipt" ? "{SKU}" : "{Lokasyon}" }] });
+    });
     const panelUrl = await startPanel((req, res) => {
       received.push({ path: req.path, body: req.body });
-      res.json({ success: true, data: { job: { id: "job-1" } } });
+      res.json({ success: true, data: { id: "job-1" } });
     });
-    const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET });
-    await request(app).post("/api/admin/packages/pkg-1/print").set("Cookie", sessionCookie)
+    const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET, labelPrinterBaseUrl: labelUrl });
+    await request(app).post("/api/admin/packages/pkg-1/print").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
       .send({ idempotency_key: "p-1", template_purpose: "shipping" });
-    await request(app).post("/api/admin/locations/loc-1/print").set("Cookie", sessionCookie)
+    await request(app).post("/api/admin/locations/loc-1/print").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
       .send({ idempotency_key: "l-1", template_purpose: "custom" });
     expect(received).toEqual([
-      { path: "/api/warehouse/v1/admin/packages/pkg-1/print", body: { idempotency_key: "p-1", template_purpose: "goods_receipt" } },
-      { path: "/api/warehouse/v1/admin/locations/loc-1/print", body: { idempotency_key: "l-1", template_purpose: "location" } },
+      { path: "/api/warehouse/v1/admin/packages/pkg-1/print", body: { claim_token: null, idempotency_key: "p-1", device_id: "", printer_name: null,
+        template_snapshot: { id: "goods_receipt-v3", name: "goods_receipt", purpose: "goods_receipt", version: 3, contentHash: "a".repeat(64), width: 100, height: 150,
+          elements: [{ id: "barcode", type: "barcode", value: "{SKU}" }] } } },
+      { path: "/api/warehouse/v1/admin/locations/loc-1/print", body: { idempotency_key: "l-1", device_id: "", printer_name: null,
+        template_snapshot: { id: "location-v3", name: "location", purpose: "location", version: 3, contentHash: "a".repeat(64), width: 100, height: 50,
+          elements: [{ id: "barcode", type: "barcode", value: "{Lokasyon}" }] } } },
     ]);
   });
 
@@ -390,15 +643,22 @@ describe("Warehouse BFF", () => {
     const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
       .post("/api/orders/order-1/complete")
       .set("Cookie", sessionCookie)
+      .set("Origin", TRUSTED_ORIGIN)
       .send({ note: "  Kırılabilir  ", role: "admin" });
     expect(response.status).toBe(200);
     expect(receivedBody).toEqual({ note: "Kırılabilir" });
   });
 
-  it("logout oturum cookie'sini temizler", async () => {
-    const response = await request(createWarehouseApp({ panelApiBaseUrl: "http://panel.test", warehouseApiKey: SECRET }))
-      .post("/api/auth/logout").set("Cookie", sessionCookie);
+  it("logout Panel session'ını human + service identity ile revoke eder ve sonra cookie'yi temizler", async () => {
+    let received: { path?: string; token?: string; key?: string } = {};
+    const panelUrl = await startPanel((req, res) => {
+      received = { path: req.path, token: req.header("authorization"), key: req.header("x-api-key") };
+      res.json({ success: true });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .post("/api/auth/logout").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN);
     expect(response.status).toBe(200);
     expect(response.headers["set-cookie"]?.[0]).toMatch(/warehouse_session=;/);
+    expect(received).toEqual({ path: "/api/auth/service/logout", token: `Bearer ${SESSION}`, key: SECRET });
   });
 });
