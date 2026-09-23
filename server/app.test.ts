@@ -607,20 +607,30 @@ describe("Warehouse BFF", () => {
     expect(labelRequest).not.toHaveBeenCalled();
   });
 
-  it("paket ve lokasyon baskısında purpose değerini istemciden bağımsız sabitler", async () => {
+  it("paket ve lokasyon baskısında L'nin exact template snapshot'ını P'ye iletir", async () => {
     const received: Array<{ path: string; body: unknown }> = [];
+    const labelUrl = await startPanel((req, res) => {
+      const purpose = String(req.query.purpose);
+      res.json({ id: `${purpose}-v3`, name: purpose, purpose, version: 3, contentHash: "a".repeat(64),
+        width: 100, height: purpose === "goods_receipt" ? 150 : 50,
+        elements: [{ id: "barcode", type: "barcode", value: purpose === "goods_receipt" ? "{SKU}" : "{Lokasyon}" }] });
+    });
     const panelUrl = await startPanel((req, res) => {
       received.push({ path: req.path, body: req.body });
-      res.json({ success: true, data: { job: { id: "job-1" } } });
+      res.json({ success: true, data: { id: "job-1" } });
     });
-    const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET });
+    const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET, labelPrinterBaseUrl: labelUrl });
     await request(app).post("/api/admin/packages/pkg-1/print").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
       .send({ idempotency_key: "p-1", template_purpose: "shipping" });
     await request(app).post("/api/admin/locations/loc-1/print").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
       .send({ idempotency_key: "l-1", template_purpose: "custom" });
     expect(received).toEqual([
-      { path: "/api/warehouse/v1/admin/packages/pkg-1/print", body: { idempotency_key: "p-1", template_purpose: "goods_receipt" } },
-      { path: "/api/warehouse/v1/admin/locations/loc-1/print", body: { idempotency_key: "l-1", template_purpose: "location" } },
+      { path: "/api/warehouse/v1/admin/packages/pkg-1/print", body: { claim_token: null, idempotency_key: "p-1", device_id: "", printer_name: null,
+        template_snapshot: { id: "goods_receipt-v3", name: "goods_receipt", purpose: "goods_receipt", version: 3, contentHash: "a".repeat(64), width: 100, height: 150,
+          elements: [{ id: "barcode", type: "barcode", value: "{SKU}" }] } } },
+      { path: "/api/warehouse/v1/admin/locations/loc-1/print", body: { idempotency_key: "l-1", device_id: "", printer_name: null,
+        template_snapshot: { id: "location-v3", name: "location", purpose: "location", version: 3, contentHash: "a".repeat(64), width: 100, height: 50,
+          elements: [{ id: "barcode", type: "barcode", value: "{Lokasyon}" }] } } },
     ]);
   });
 

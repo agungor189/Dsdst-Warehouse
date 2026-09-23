@@ -19,7 +19,7 @@ vi.mock("../lib/api", () => ({
   warehouseExecutionApi: { receiveGoods: api.receiveGoods },
 }));
 
-import { formatReceivingEvent, InboundPage, ReplenishmentPage, requestReceivingLocationWithRetry } from "./WarehouseAdminPages";
+import { formatReceivingEvent, InboundPage, LabelingPage, LabelTemplatesPage, PrintJobsPage, ReplenishmentPage, requestReceivingLocationWithRetry } from "./WarehouseAdminPages";
 
 describe("Mal Kabul kullanıcı akışı", () => {
   beforeEach(() => {
@@ -44,6 +44,29 @@ describe("Mal Kabul kullanıcı akışı", () => {
     expect(source).toContain("completeReplenishment");
     expect(source).toContain("scannedSource");
     expect(source).toContain("scanDestination");
+  });
+
+  it("V2-14 operatör ekranı önizleme ve explicit Yazdır aksiyonlarını ayırır", () => {
+    const source = LabelingPage.toString();
+    expect(source).toContain("getPackagePrintPreview");
+    expect(source).toContain("labelApi.preview");
+    expect(source).toContain("warehouseAdminApi.queuePrint");
+    expect(source).toContain("Yazdır");
+  });
+
+  it("baskı geçmişi mandatory reprint reason ve fiziksel onay aksiyonlarını gösterir", () => {
+    const source = PrintJobsPage.toString();
+    expect(source).toContain("DAMAGED_OUTPUT");
+    expect(source).toContain("PRINTER_ERROR");
+    expect(source).toContain("confirmPrinted");
+    expect(source).toContain("OTHER");
+  });
+
+  it("Warehouse template ekranında JSON düzenleme yüzeyi bulunmaz", () => {
+    const source = LabelTemplatesPage.toString();
+    expect(source).not.toContain("textarea");
+    expect(source).not.toContain("JSON.stringify");
+    expect(source).toContain("contentHash");
   });
 
   it("geçici lokasyon hatasını 1 ve 2 saniyelik kontrollü beklemelerle tekrar dener", async () => {

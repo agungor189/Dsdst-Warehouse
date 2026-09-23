@@ -380,6 +380,23 @@ export function createWarehouseApp(config) {
         }
         return res.status(upstream.status).type(contentType).send(Buffer.from(await upstream.arrayBuffer()));
     });
+    const defaultTemplateSnapshot = async (res, purpose) => {
+        const upstream = await fetchLabelPrinter(res, `/api/v1/templates/default?purpose=${encodeURIComponent(purpose)}`, { headers: { Accept: "application/json" } });
+        if (!upstream)
+            return null;
+        const raw = await upstream.text();
+        if (!upstream.ok) {
+            res.status(upstream.status).type("application/json").send(raw);
+            return null;
+        }
+        try {
+            return JSON.parse(raw);
+        }
+        catch {
+            res.status(502).json({ success: false, error: { code: "LABEL_PRINTER_INVALID_RESPONSE", message: "Label Printer geçersiz şablon snapshot'ı döndürdü." } });
+            return null;
+        }
+    };
     const forward = async (req, res, method, upstreamPath, query, body, binary = false) => {
         if (configurationFailure(res))
             return;
@@ -507,6 +524,10 @@ export function createWarehouseApp(config) {
         idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
     }));
     app.post("/api/shipping/v1/shipments/:id/geliver/offers/:offerId/accept", requireSession, (req, res) => forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/geliver/offers/${encodeURIComponent(String(req.params.offerId))}/accept`, undefined, {
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
+    app.post("/api/shipping/v1/shipments/:id/packages/:packageId/print", requireSession, (req, res) => forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/packages/${encodeURIComponent(String(req.params.packageId))}/print`, undefined, {
+        printer_name: safeQueryText(req.body?.printer_name, 160) || null,
         idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
     }));
     app.post("/api/shipping/v1/shipments/:id/cancel", requireSession, (req, res) => forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/cancel`, undefined, {
@@ -659,10 +680,19 @@ export function createWarehouseApp(config) {
         return forward(req, res, "POST", "/admin/packages/claim-next", undefined, body);
     });
     app.get("/api/admin/packages/by-code/:code", requireSession, (req, res) => forward(req, res, "GET", `/admin/packages/by-code/${encodeURIComponent(String(req.params.code))}`));
-    app.post("/api/admin/packages/:id/print", requireSession, (req, res) => forward(req, res, "POST", `/admin/packages/${encodeURIComponent(String(req.params.id))}/print`, undefined, {
-        ...safeAdminBody(req.body),
-        template_purpose: "goods_receipt",
-    }));
+    app.get("/api/admin/packages/:id/print-preview", requireSession, (req, res) => forward(req, res, "GET", `/admin/packages/${encodeURIComponent(String(req.params.id))}/print-preview`));
+    app.post("/api/admin/packages/:id/print", requireSession, async (req, res) => {
+        const templateSnapshot = await defaultTemplateSnapshot(res, "goods_receipt");
+        if (!templateSnapshot)
+            return;
+        return forward(req, res, "POST", `/admin/packages/${encodeURIComponent(String(req.params.id))}/print`, undefined, {
+            claim_token: safeQueryText(req.body?.claim_token, 200) || null,
+            idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+            device_id: safeQueryText(req.body?.device_id, 150),
+            printer_name: safeQueryText(req.body?.printer_name, 160) || null,
+            template_snapshot: templateSnapshot,
+        });
+    });
     app.post("/api/admin/packages/:id/release-receiving", requireSession, (req, res) => forward(req, res, "POST", `/admin/packages/${encodeURIComponent(String(req.params.id))}/release-receiving`, undefined, {
         device_id: safeQueryText(req.body?.device_id, 150),
     }));
@@ -670,11 +700,27 @@ export function createWarehouseApp(config) {
         const query = new URLSearchParams({ limit: String(safePositiveInteger(req.query.limit, 100, 500)) });
         return forward(req, res, "GET", "/admin/print-jobs", query);
     });
-    app.get("/api/admin/locations", requireSession, (req, res) => forward(req, res, "GET", "/admin/locations"));
-    app.post("/api/admin/locations/:id/print", requireSession, (req, res) => forward(req, res, "POST", `/admin/locations/${encodeURIComponent(String(req.params.id))}/print`, undefined, {
-        ...safeAdminBody(req.body),
-        template_purpose: "location",
+    app.post("/api/admin/print-jobs/:id/reprint", requireSession, (req, res) => forward(req, res, "POST", `/admin/print-jobs/${encodeURIComponent(String(req.params.id))}/reprint`, undefined, {
+        reason: safeQueryText(req.body?.reason, 40),
+        explanation: safeQueryText(req.body?.explanation, 1000) || null,
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
     }));
+    app.post("/api/admin/print-jobs/:id/confirm", requireSession, (req, res) => forward(req, res, "POST", `/admin/print-jobs/${encodeURIComponent(String(req.params.id))}/confirm`, undefined, {
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
+    app.get("/api/admin/locations", requireSession, (req, res) => forward(req, res, "GET", "/admin/locations"));
+    app.get("/api/admin/locations/:id/print-preview", requireSession, (req, res) => forward(req, res, "GET", `/admin/locations/${encodeURIComponent(String(req.params.id))}/print-preview`));
+    app.post("/api/admin/locations/:id/print", requireSession, async (req, res) => {
+        const templateSnapshot = await defaultTemplateSnapshot(res, "location");
+        if (!templateSnapshot)
+            return;
+        return forward(req, res, "POST", `/admin/locations/${encodeURIComponent(String(req.params.id))}/print`, undefined, {
+            idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+            device_id: safeQueryText(req.body?.device_id, 150),
+            printer_name: safeQueryText(req.body?.printer_name, 160) || null,
+            template_snapshot: templateSnapshot,
+        });
+    });
     app.get("/api/admin/warehouse-map", requireSession, (req, res) => forward(req, res, "GET", "/admin/warehouse-map"));
     app.get("/api/admin/layouts/placement", requireSession, (req, res) => forward(req, res, "GET", "/admin/layouts/placement"));
     app.post("/api/admin/layouts/import-legacy", requireSession, (req, res) => forward(req, res, "POST", "/admin/layouts/import-legacy", undefined, safeAdminBody(req.body)));

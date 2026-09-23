@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { PackageCheck, RefreshCw, Truck, XCircle } from "lucide-react";
+import { PackageCheck, Printer, RefreshCw, Truck, XCircle } from "lucide-react";
 import { hasWarehousePermission, useAuth } from "../features/auth/AuthContext";
 import { shipmentApi } from "../lib/api";
 import type { GeliverLivePackage, ShipmentV1 } from "../types/warehouse";
@@ -22,6 +22,7 @@ export default function ShipmentPage() {
   const [busy, setBusy] = useState(false);
   const canManage = hasWarehousePermission(user, "shipping:manage");
   const canDispatch = hasWarehousePermission(user, "shipping:dispatch");
+  const canPrint = hasWarehousePermission(user, "warehouse:print_labels");
 
   const defaultDraft = (current: ShipmentV1, includeAll: boolean): PackageDraft => ({ lengthMm: "", widthMm: "", heightMm: "", weightGrams: "",
     contents: Object.fromEntries(current.requiredContents.map((item) => [item.productId, includeAll ? String(item.quantityBaseInt) : "0"])) });
@@ -76,6 +77,12 @@ export default function ShipmentPage() {
     catch (error: any) { setFeedback(error.message); } finally { setBusy(false); }
   };
 
+  const printNativeLabel = async (packageId: string) => {
+    setBusy(true); setFeedback("");
+    try { const job = await shipmentApi.queueNativeLabel(shipment!.id, packageId); setFeedback(`${job.subject_code} sağlayıcı etiketi kuyruğa alındı; fiziksel baskı henüz doğrulanmadı.`); }
+    catch (error: any) { setFeedback(error.message); } finally { setBusy(false); }
+  };
+
   const cancel = async () => {
     setBusy(true); setFeedback("");
     try { setShipment(await shipmentApi.cancel(shipment!.id, cancelReason)); setFeedback("Sevkiyat teslim öncesi iptal edildi."); }
@@ -105,7 +112,7 @@ export default function ShipmentPage() {
         <div className="mt-4 grid gap-2 sm:grid-cols-2">{shipment.packages.map((pack) => <div key={pack.id} className="rounded-2xl border border-line p-3 text-sm">
           <b>Paket {pack.packageNumber}</b><p className="text-muted">{pack.measurementSource} · {pack.dimensionsMm.length}×{pack.dimensionsMm.width}×{pack.dimensionsMm.height} mm · {pack.weightGrams} g</p>
           <p>Booking: {pack.booking ? "hazır" : "bekliyor"} · Etiket: {pack.label ? pack.label.mediaType || "sağlayıcı formatı" : "bekliyor"}</p>
-          <p>Takip: {pack.booking?.trackingNumber || "henüz atanmadı"}</p></div>)}</div>
+          <p>Takip: {pack.booking?.trackingNumber || "henüz atanmadı"}</p>{pack.label && <div className="mt-3 grid grid-cols-2 gap-2"><a className="secondary-button" href={pack.label.reference} target="_blank" rel="noreferrer">Önizle</a>{canPrint && <button className="secondary-button" disabled={busy} onClick={() => void printNativeLabel(pack.id)}><Printer className="size-4"/> Yazdır</button>}</div>}</div>)}</div>
       </section>
       {canManage && shipment.state === "PREPARING" && shipment.packageCount === 0 && <section className="rounded-3xl border border-line bg-white p-5">
         <h2 className="text-lg font-black">Paket ölçümleri ve içerikleri</h2><p className="mt-1 text-xs text-muted">Ölçülen değerleri paket bazında girin; içerik toplamları rezervasyonla eşleşmelidir.</p>
