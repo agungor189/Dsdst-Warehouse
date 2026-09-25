@@ -140,6 +140,14 @@ export const warehouseApi = {
   async getOrder(id: string) {
     return (await request<WarehouseOrder>(`/orders/${encodeURIComponent(id)}`)).data;
   },
+  async getOrderReservation(id: string) {
+    return (await request<{
+      id: string;
+      orderId: string;
+      status: InventoryFulfillmentV1["status"];
+      shipmentId: string | null;
+    }>(`/orders/${encodeURIComponent(id)}/reservation`)).data;
+  },
   async getPickPlan(id: string) {
     return (await request<PickPlan>(`/orders/${encodeURIComponent(id)}/pick-plan`)).data;
   },
@@ -212,7 +220,10 @@ export const inventoryApi = {
     })).data;
   },
   async markPacked(reservationId: string, at?: string) {
-    return (await request<InventoryReservationV1>(`/inventory/v1/reservations/${encodeURIComponent(reservationId)}/pack`, {
+    return (await request<{
+      reservation: InventoryReservationV1;
+      shipment: ShipmentV1;
+    }>(`/inventory/v1/reservations/${encodeURIComponent(reservationId)}/pack`, {
       method: "POST", body: JSON.stringify({ at, idempotency_key: inventoryOperation() }),
     })).data;
   },

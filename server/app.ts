@@ -603,6 +603,8 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     }));
   app.get("/api/orders/:id", requireSession, (req, res) =>
     forward(req, res, "GET", `/orders/${encodeURIComponent(String(req.params.id))}`));
+  app.get("/api/orders/:id/reservation", requireSession, (req, res) =>
+    forward(req, res, "GET", `/orders/${encodeURIComponent(String(req.params.id))}/reservation`));
   app.get("/api/orders/:id/pick-plan", requireSession, (req, res) =>
     forward(req, res, "GET", `/orders/${encodeURIComponent(String(req.params.id))}/pick-plan`));
   app.get("/api/scan/:code", requireSession, (req, res) =>

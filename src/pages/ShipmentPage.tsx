@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { PackageCheck, Printer, RefreshCw, Truck, XCircle } from "lucide-react";
 import { hasWarehousePermission, useAuth } from "../features/auth/AuthContext";
 import { shipmentApi } from "../lib/api";
@@ -10,7 +11,8 @@ const emptyRecipient = { name: "", email: "", phone: "", address1: "", address2:
 
 export default function ShipmentPage() {
   const { user } = useAuth();
-  const [shipmentId, setShipmentId] = useState("");
+  const [searchParams] = useSearchParams();
+  const [shipmentId, setShipmentId] = useState(() => searchParams.get("shipmentId") || "");
   const [shipment, setShipment] = useState<ShipmentV1 | null>(null);
   const [packageDrafts, setPackageDrafts] = useState<PackageDraft[]>([]);
   const [recipient, setRecipient] = useState(emptyRecipient);
@@ -36,6 +38,11 @@ export default function ShipmentPage() {
   };
 
   useEffect(() => { setShipment(null); setPackageDrafts([]); setLivePackages([]); }, [shipmentId]);
+  // initial shipment from query
+  useEffect(() => {
+    if (!shipmentId.trim()) return;
+    void load();
+  }, []);
   useEffect(() => {
     if (shipment?.state === "PREPARING" && shipment.packageCount === 0 && packageDrafts.length === 0) setPackageDrafts([defaultDraft(shipment, true)]);
     if (shipment?.recipient) setRecipient({ ...emptyRecipient, ...shipment.recipient,
