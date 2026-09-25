@@ -257,10 +257,14 @@ export const shipmentApi = {
       method: "POST", body: JSON.stringify({ requestedAt: new Date().toISOString(), idempotency_key: inventoryOperation() }),
     })).data;
   },
-  async loadGeliverOffers(shipmentId: string, recipient: { name: string; email: string; phone?: string; address1: string;
+  async loadGeliverOffers(shipmentId: string, recipient?: { name: string; email: string; phone?: string; address1: string;
     address2?: string; countryCode: string; cityName: string; cityCode: string; districtName: string; districtID?: string; zip?: string }) {
     return (await request<GeliverLivePackage[]>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/geliver/offers`, {
-      method: "POST", body: JSON.stringify({ recipient, idempotency_key: inventoryOperation() }),
+      method: "POST",
+      body: JSON.stringify({
+        ...(recipient ? { recipient } : {}),
+        idempotency_key: inventoryOperation(),
+      }),
     })).data;
   },
   async refreshGeliver(shipmentId: string) {

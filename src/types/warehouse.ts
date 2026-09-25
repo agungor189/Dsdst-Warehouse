@@ -30,6 +30,7 @@ export interface ShipmentV1 {
   id: string;
   orderId: string;
   orderNumber: string;
+  sourceChannel: string;
   reservationId: string;
   state: ShipmentState;
   packageCount: number;

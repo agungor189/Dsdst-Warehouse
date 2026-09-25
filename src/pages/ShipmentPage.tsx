@@ -55,10 +55,15 @@ export default function ShipmentPage() {
     } catch (error: any) { setFeedback(error.message); } finally { setBusy(false); }
   };
 
+  const automaticMarketplaceRecipient = shipment?.sourceChannel?.toUpperCase() === "TRENDYOL";
+
   const loadOffers = async () => {
     setBusy(true); setFeedback("");
     try {
-      const data = await shipmentApi.loadGeliverOffers(shipment!.id, recipient);
+      const data = await shipmentApi.loadGeliverOffers(
+        shipment!.id,
+        automaticMarketplaceRecipient ? undefined : recipient,
+      );
       setLivePackages(data); setShipment(await shipmentApi.get(shipment!.id));
       setFeedback(data.some((item) => item.offers.length) ? "Canlı Geliver teklifleri alındı; seçim operatöre bırakıldı." : "Teklifler henüz hazır değil; yenileyin.");
     } catch (error: any) { setFeedback(error.message); } finally { setBusy(false); }
@@ -130,12 +135,22 @@ export default function ShipmentPage() {
       </section>}
       {canManage && shipment.state === "PREPARING" && shipment.packageCount > 0 && livePackages.length === 0 && <section className="rounded-3xl border border-line bg-white p-5">
         <div className="flex items-center gap-2"><Truck/><h2 className="text-lg font-black">Geliver alıcı ve canlı teklifler</h2></div>
-        <p className="mt-1 text-xs text-muted">Alıcı adresi sağlayıcı gönderisine immutable snapshot olarak bağlanır. Eksik alanla gönderi oluşturulmaz.</p>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{(Object.keys(emptyRecipient) as Array<keyof typeof emptyRecipient>).map((key) => <input key={key} className="field"
-          value={recipient[key] || ""} placeholder={({ name: "Ad soyad", email: "E-posta", phone: "Telefon", address1: "Adres", address2: "Adres 2 (opsiyonel)", countryCode: "Ülke kodu",
-            cityName: "İl", cityCode: "İl kodu", districtName: "İlçe", districtID: "İlçe ID (opsiyonel)", zip: "Posta kodu (opsiyonel)" })[key]}
-          onChange={(event) => setRecipient((current) => ({ ...current, [key]: event.target.value }))}/>)}</div>
-        <button className="primary-button mt-4" disabled={busy || !recipient.name || !recipient.email || !recipient.address1 || !recipient.countryCode || !recipient.cityName || !recipient.cityCode || !recipient.districtName}
+        {automaticMarketplaceRecipient ? (
+          <div className="mt-4 rounded-2xl border border-line bg-canvas p-4">
+            <p className="font-black">Alıcı bilgileri Trendyol siparişinden otomatik alınacak.</p>
+            <p className="mt-1 text-xs text-muted">İl ve ilçe kodları Geliver verisinden otomatik çözümlenir; manuel adres girişi gerekmez.</p>
+          </div>
+        ) : (
+          <>
+            <p className="mt-1 text-xs text-muted">Alıcı adresi sağlayıcı gönderisine immutable snapshot olarak bağlanır. Eksik alanla gönderi oluşturulmaz.</p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{(Object.keys(emptyRecipient) as Array<keyof typeof emptyRecipient>).map((key) => <input key={key} className="field"
+              value={recipient[key] || ""} placeholder={({ name: "Ad soyad", email: "E-posta", phone: "Telefon", address1: "Adres", address2: "Adres 2 (opsiyonel)", countryCode: "Ülke kodu",
+                cityName: "İl", cityCode: "İl kodu", districtName: "İlçe", districtID: "İlçe ID (opsiyonel)", zip: "Posta kodu (opsiyonel)" })[key]}
+              onChange={(event) => setRecipient((current) => ({ ...current, [key]: event.target.value }))}/>)}</div>
+          </>
+        )}
+        <button className="primary-button mt-4"
+          disabled={busy || (!automaticMarketplaceRecipient && (!recipient.name || !recipient.email || !recipient.address1 || !recipient.countryCode || !recipient.cityName || !recipient.cityCode || !recipient.districtName))}
           onClick={() => void loadOffers()}>Canlı teklifleri getir</button>
       </section>}
       {canManage && livePackages.length > 0 && <section className="rounded-3xl border border-line bg-white p-5">
