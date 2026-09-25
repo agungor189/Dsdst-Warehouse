@@ -140,6 +140,14 @@ export const warehouseApi = {
   async getOrder(id: string) {
     return (await request<WarehouseOrder>(`/orders/${encodeURIComponent(id)}`)).data;
   },
+  async getOrderReservation(id: string) {
+    return (await request<{
+      id: string;
+      orderId: string;
+      status: InventoryFulfillmentV1["status"];
+      shipmentId: string | null;
+    }>(`/orders/${encodeURIComponent(id)}/reservation`)).data;
+  },
   async getPickPlan(id: string) {
     return (await request<PickPlan>(`/orders/${encodeURIComponent(id)}/pick-plan`)).data;
   },
@@ -212,7 +220,10 @@ export const inventoryApi = {
     })).data;
   },
   async markPacked(reservationId: string, at?: string) {
-    return (await request<InventoryReservationV1>(`/inventory/v1/reservations/${encodeURIComponent(reservationId)}/pack`, {
+    return (await request<{
+      reservation: InventoryReservationV1;
+      shipment: ShipmentV1;
+    }>(`/inventory/v1/reservations/${encodeURIComponent(reservationId)}/pack`, {
       method: "POST", body: JSON.stringify({ at, idempotency_key: inventoryOperation() }),
     })).data;
   },
@@ -257,10 +268,14 @@ export const shipmentApi = {
       method: "POST", body: JSON.stringify({ requestedAt: new Date().toISOString(), idempotency_key: inventoryOperation() }),
     })).data;
   },
-  async loadGeliverOffers(shipmentId: string, recipient: { name: string; email: string; phone?: string; address1: string;
+  async loadGeliverOffers(shipmentId: string, recipient?: { name: string; email: string; phone?: string; address1: string;
     address2?: string; countryCode: string; cityName: string; cityCode: string; districtName: string; districtID?: string; zip?: string }) {
     return (await request<GeliverLivePackage[]>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/geliver/offers`, {
-      method: "POST", body: JSON.stringify({ recipient, idempotency_key: inventoryOperation() }),
+      method: "POST",
+      body: JSON.stringify({
+        ...(recipient ? { recipient } : {}),
+        idempotency_key: inventoryOperation(),
+      }),
     })).data;
   },
   async refreshGeliver(shipmentId: string) {
