@@ -26,6 +26,19 @@ export type WarehousePermission =
 
 export type ShipmentState = "PREPARING" | "CARRIER_SELECTED" | "BOOKED" | "LABEL_READY" | "HANDED_OFF" | "DISPATCHED" | "CANCELLED" | "EXCEPTION";
 
+export interface ShipmentSummaryV1 {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  sourceChannel: string;
+  reservationId: string;
+  state: ShipmentState;
+  packageCount: number;
+  customerName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ShipmentV1 {
   id: string;
   orderId: string;

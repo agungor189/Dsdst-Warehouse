@@ -26,7 +26,7 @@ import type {
   InventoryReservationV1,
   WarehouseExecutionPackage,
   WarehouseExecutionLocation,
-  ShipmentV1, GeliverLivePackage,
+  ShipmentV1, ShipmentSummaryV1, GeliverLivePackage,
 } from "../types/warehouse";
 import type { ReceivingLot, ReceivingSession } from "../types/warehouse";
 
@@ -245,6 +245,18 @@ export const reconciliationApi = {
 };
 
 export const shipmentApi = {
+  async list(scope: "pending" | "completed" | "all" = "pending", query = "") {
+    const params = new URLSearchParams({
+      scope,
+      limit: "200",
+    });
+    if (query.trim()) params.set("q", query.trim());
+
+    return (await request<ShipmentSummaryV1[]>(
+      `/shipping/v1/shipments?${params.toString()}`
+    )).data;
+  },
+
   async get(shipmentId: string) {
     return (await request<ShipmentV1>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}`)).data;
   },

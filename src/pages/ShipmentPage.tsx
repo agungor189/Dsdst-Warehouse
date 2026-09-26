@@ -3,8 +3,8 @@ import { useSearchParams } from "react-router-dom";
 import { PackageCheck, Printer, RefreshCw, Truck, XCircle } from "lucide-react";
 import { hasWarehousePermission, useAuth } from "../features/auth/AuthContext";
 import { shipmentApi } from "../lib/api";
-import type { GeliverLivePackage, ShipmentV1 } from "../types/warehouse";
-import { Badge, Button, Card, Input, PageHeader } from "../components/ui";
+import type { GeliverLivePackage, ShipmentSummaryV1, ShipmentV1 } from "../types/warehouse";
+import { Badge, Button, Card, EmptyState, Input, LoadingState, PageHeader } from "../components/ui";
 
 type PackageDraft = { lengthMm: string; widthMm: string; heightMm: string; weightGrams: string; contents: Record<string, string> };
 const emptyRecipient = { name: "", email: "", phone: "", address1: "", address2: "", countryCode: "TR",
@@ -15,6 +15,10 @@ export default function ShipmentPage() {
   const [searchParams] = useSearchParams();
   const [shipmentId, setShipmentId] = useState(() => searchParams.get("shipmentId") || "");
   const [shipment, setShipment] = useState<ShipmentV1 | null>(null);
+  const [shipments, setShipments] = useState<ShipmentSummaryV1[]>([]);
+  const [shipmentScope, setShipmentScope] = useState<"pending" | "completed" | "all">("pending");
+  const [shipmentSearch, setShipmentSearch] = useState("");
+  const [listBusy, setListBusy] = useState(false);
   const [packageDrafts, setPackageDrafts] = useState<PackageDraft[]>([]);
   const [recipient, setRecipient] = useState(emptyRecipient);
   const [livePackages, setLivePackages] = useState<GeliverLivePackage[]>([]);
@@ -30,13 +34,63 @@ export default function ShipmentPage() {
   const defaultDraft = (current: ShipmentV1, includeAll: boolean): PackageDraft => ({ lengthMm: "", widthMm: "", heightMm: "", weightGrams: "",
     contents: Object.fromEntries(current.requiredContents.map((item) => [item.productId, includeAll ? String(item.quantityBaseInt) : "0"])) });
 
-  const load = async () => {
-    if (!shipmentId.trim()) return;
-    setBusy(true); setFeedback(""); setLivePackages([]);
-    try { setShipment(await shipmentApi.get(shipmentId.trim())); }
-    catch (error: any) { setFeedback(error.message); }
-    finally { setBusy(false); }
+  const loadShipments = async (silent = false) => {
+    if (!silent) setListBusy(true);
+    try {
+      setShipments(await shipmentApi.list(shipmentScope));
+    } catch (error: any) {
+      if (!silent) setFeedback(error.message);
+    } finally {
+      if (!silent) setListBusy(false);
+    }
   };
+
+  const loadById = async (id: string) => {
+    const normalized = id.trim();
+    if (!normalized) return;
+
+    setShipmentId(normalized);
+    setBusy(true);
+    setFeedback("");
+    setLivePackages([]);
+
+    try {
+      setShipment(await shipmentApi.get(normalized));
+    } catch (error: any) {
+      setFeedback(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const load = async () => {
+    await loadById(shipmentId);
+  };
+
+  useEffect(() => {
+    void loadShipments();
+
+    const timer = window.setInterval(() => {
+      void loadShipments(true);
+    }, 15_000);
+
+    const refreshVisible = () => {
+      if (document.visibilityState === "visible") void loadShipments(true);
+    };
+
+    const refreshFocus = () => {
+      void loadShipments(true);
+    };
+
+    document.addEventListener("visibilitychange", refreshVisible);
+    window.addEventListener("focus", refreshFocus);
+
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshVisible);
+      window.removeEventListener("focus", refreshFocus);
+    };
+  }, [shipmentScope]);
 
   useEffect(() => { setShipment(null); setPackageDrafts([]); setLivePackages([]); }, [shipmentId]);
   // initial shipment from query
@@ -63,7 +117,7 @@ export default function ShipmentPage() {
     } catch (error: any) { setFeedback(error.message); } finally { setBusy(false); }
   };
 
-  const automaticMarketplaceRecipient = shipment?.sourceChannel?.toUpperCase() === "TRENDYOL";
+  const automaticMarketplaceRecipient = ["TRENDYOL", "SHOPIFY"].includes(shipment?.sourceChannel?.toUpperCase() || "");
 
   const loadOffers = async () => {
     setBusy(true); setFeedback("");
@@ -110,12 +164,124 @@ export default function ShipmentPage() {
     catch (error: any) { setFeedback(error.message); } finally { setBusy(false); }
   };
 
+  const normalizedShipmentSearch = shipmentSearch.trim().toLocaleLowerCase("tr-TR");
+
+  const visibleShipments = shipments.filter((item) => {
+    if (!normalizedShipmentSearch) return true;
+
+    return [
+      item.id,
+      item.orderNumber,
+      item.customerName || "",
+      item.sourceChannel,
+      item.state,
+    ].some((value) =>
+      String(value).toLocaleLowerCase("tr-TR").includes(normalizedShipmentSearch)
+    );
+  });
+
+  const shipmentStateLabel = (state: ShipmentSummaryV1["state"]) => ({
+    PREPARING: "Hazırlanıyor",
+    CARRIER_SELECTED: "Kargo seçildi",
+    BOOKED: "Booking hazır",
+    LABEL_READY: "Etiket hazır",
+    HANDED_OFF: "Teslim edildi",
+    DISPATCHED: "Gönderildi",
+    CANCELLED: "İptal",
+    EXCEPTION: "Sorunlu",
+  })[state] || state;
+
   const cancellable = shipment && !["HANDED_OFF", "DISPATCHED", "CANCELLED"].includes(shipment.state);
   return <div className="space-y-5 pt-4">
     <PageHeader eyebrow="V2-13" title="Sevkiyat & Geliver" description="Canlı teklif seçimi operatöre aittir. Booking, etiket ve takip stok düşmez; yalnız fiziksel teslim dispatch yapar."/>
     <Card as="section" padding="lg" className="rounded-3xl">
-      <div className="flex gap-2"><Input containerClassName="flex-1" label="Shipment ID" value={shipmentId} onChange={(event) => setShipmentId(event.target.value)} placeholder="shipment:reservation-id"/>
-        <Button className="self-end" loading={busy} disabled={!shipmentId.trim()} onClick={() => void load()}>Yükle</Button></div></Card>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h2 className="text-lg font-black">Sevkiyatlar</h2>
+          <p className="mt-1 text-xs text-muted">Bekleyen sevkiyatlar otomatik listelenir.</p>
+        </div>
+        <Button variant="secondary" loading={listBusy} onClick={() => void loadShipments()}>
+          <RefreshCw className="size-4"/> Yenile
+        </Button>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {([
+          ["pending", "Bekleyenler"],
+          ["completed", "Tamamlananlar"],
+          ["all", "Tümü"],
+        ] as const).map(([value, label]) => (
+          <Button
+            key={value}
+            variant={shipmentScope === value ? "primary" : "secondary"}
+            size="sm"
+            onClick={() => setShipmentScope(value)}
+          >
+            {label}
+          </Button>
+        ))}
+      </div>
+
+      <Input
+        containerClassName="mt-4"
+        value={shipmentSearch}
+        onChange={(event) => setShipmentSearch(event.target.value)}
+        placeholder="Sipariş no, müşteri, platform veya Shipment ID ara"
+      />
+
+      <div className="mt-4 space-y-2">
+        {listBusy && shipments.length === 0 && (
+          <LoadingState compact label="Sevkiyatlar yükleniyor..."/>
+        )}
+
+        {!listBusy && visibleShipments.length === 0 && (
+          <EmptyState title="Bu filtrede sevkiyat bulunamadı."/>
+        )}
+
+        {visibleShipments.map((item) => (
+          <button
+            key={item.id}
+            className="grid w-full gap-2 rounded-2xl border border-line p-4 text-left transition hover:bg-canvas sm:grid-cols-[1.3fr_1fr_1fr_auto]"
+            onClick={() => void loadById(item.id)}
+          >
+            <div>
+              <p className="font-black">{item.orderNumber || item.id}</p>
+              <p className="mt-1 break-all text-xs text-muted">{item.id}</p>
+            </div>
+
+            <div>
+              <p className="text-xs font-black uppercase tracking-wide text-muted">Müşteri</p>
+              <p className="mt-1 text-sm font-bold">{item.customerName || "—"}</p>
+            </div>
+
+            <div>
+              <p className="text-xs font-black uppercase tracking-wide text-muted">Kanal</p>
+              <p className="mt-1 text-sm font-bold">{item.sourceChannel}</p>
+            </div>
+
+            <div className="sm:text-right">
+              <p className="font-black">{shipmentStateLabel(item.state)}</p>
+              <p className="mt-1 text-xs text-muted">{item.packageCount} paket</p>
+            </div>
+          </button>
+        ))}
+      </div>
+    </Card>
+
+    <Card as="section" padding="lg" className="rounded-3xl">
+      <div className="flex gap-2">
+        <Input
+          containerClassName="flex-1"
+          label="Shipment ID ile aç"
+          value={shipmentId}
+          onChange={(event) => setShipmentId(event.target.value)}
+          placeholder="Opsiyonel: shipment:reservation-id"
+        />
+        <Button className="self-end" loading={busy} disabled={!shipmentId.trim()} onClick={() => void load()}>
+          Aç
+        </Button>
+      </div>
+    </Card>
     {shipment && <>
       <Card as="section" padding="lg" className="rounded-3xl">
         <div className="flex items-center gap-3"><span className="grid size-11 place-items-center rounded-xl bg-acid text-forest"><PackageCheck/></span>
@@ -144,7 +310,7 @@ export default function ShipmentPage() {
         <div className="flex items-center gap-2"><Truck/><h2 className="text-lg font-black">Geliver alıcı ve canlı teklifler</h2></div>
         {automaticMarketplaceRecipient ? (
           <div className="mt-4 rounded-2xl border border-line bg-canvas p-4">
-            <p className="font-black">Alıcı bilgileri Trendyol siparişinden otomatik alınacak.</p>
+            <p className="font-black">Alıcı bilgileri pazaryeri siparişinden otomatik alınacak.</p>
             <p className="mt-1 text-xs text-muted">İl ve ilçe kodları Geliver verisinden otomatik çözümlenir; manuel adres girişi gerekmez.</p>
           </div>
         ) : (
