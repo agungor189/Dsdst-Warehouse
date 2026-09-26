@@ -6,7 +6,7 @@ import { shipmentApi } from "../lib/api";
 import type { BulkHandoffResponseV1, GeliverLivePackage, ShipmentDiagnosticStage, ShipmentSummaryV1, ShipmentV1 } from "../types/warehouse";
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Input, LoadingState, PageHeader } from "../components/ui";
 
-type PackageDraft = { lengthMm: string; widthMm: string; heightMm: string; weightGrams: string; contents: Record<string, string> };
+type PackageDraft = { lengthCm: string; widthCm: string; heightCm: string; weightGrams: string; contents: Record<string, string> };
 const emptyRecipient = { name: "", email: "", phone: "", address1: "", address2: "", countryCode: "TR",
   cityName: "", cityCode: "", districtName: "", districtID: "", zip: "" };
 
@@ -19,6 +19,22 @@ const shipmentDiagnosticStageLabels: Record<ShipmentDiagnosticStage, string> = {
 };
 
 export const shipmentDiagnosticStageLabel = (stage: ShipmentDiagnosticStage) => shipmentDiagnosticStageLabels[stage];
+
+export const centimetersToMillimeters = (value: string): number | null => {
+  const match = value.trim().match(/^(\d+)(?:\.(\d))?$/);
+  if (!match) return null;
+  const millimeters = Number(match[1]) * 10 + Number(match[2] || 0);
+  return Number.isSafeInteger(millimeters) && millimeters > 0 ? millimeters : null;
+};
+
+const validPackageMeasurement = (draft: PackageDraft) => {
+  const lengthMm = centimetersToMillimeters(draft.lengthCm);
+  const widthMm = centimetersToMillimeters(draft.widthCm);
+  const heightMm = centimetersToMillimeters(draft.heightCm);
+  const weightGrams = Number(draft.weightGrams);
+  if (lengthMm === null || widthMm === null || heightMm === null || !Number.isFinite(weightGrams) || weightGrams <= 0) return null;
+  return { lengthMm, widthMm, heightMm, weightGrams };
+};
 
 export default function ShipmentPage() {
   const { user } = useAuth();
@@ -47,7 +63,7 @@ export default function ShipmentPage() {
   const canDispatch = hasWarehousePermission(user, "shipping:dispatch");
   const canPrint = hasWarehousePermission(user, "warehouse:print_labels");
 
-  const defaultDraft = (current: ShipmentV1, includeAll: boolean): PackageDraft => ({ lengthMm: "", widthMm: "", heightMm: "", weightGrams: "",
+  const defaultDraft = (current: ShipmentV1, includeAll: boolean): PackageDraft => ({ lengthCm: "", widthCm: "", heightCm: "", weightGrams: "",
     contents: Object.fromEntries(current.requiredContents.map((item) => [item.productId, includeAll ? String(item.quantityBaseInt) : "0"])) });
 
   const loadShipments = async (silent = false) => {
@@ -122,10 +138,15 @@ export default function ShipmentPage() {
   }, [shipment]);
 
   const definePackages = async () => {
+    const measurements = packageDrafts.map(validPackageMeasurement);
+    if (measurements.length === 0 || measurements.some((measurement) => measurement === null)) {
+      setFeedback("Paket ölçüleri pozitif olmalı ve santimetre değerleri en fazla bir ondalık basamak içermelidir.");
+      return;
+    }
     setBusy(true); setFeedback("");
     try {
       const packages = packageDrafts.map((draft, index) => ({ packageNumber: index + 1,
-        measured: { lengthMm: Number(draft.lengthMm), widthMm: Number(draft.widthMm), heightMm: Number(draft.heightMm), weightGrams: Number(draft.weightGrams) },
+        measured: measurements[index]!,
         contents: shipment!.requiredContents.map((item) => ({ productId: item.productId, quantityBaseInt: Number(draft.contents[item.productId] || 0) }))
           .filter((item) => item.quantityBaseInt > 0) }));
       await shipmentApi.definePackages(shipment!.id, packages);
@@ -399,7 +420,7 @@ export default function ShipmentPage() {
           <div className="flex-1"><h2 className="text-xl font-black">{shipment.orderNumber}</h2><p className="text-sm text-muted"><Badge variant={shipment.state === "CANCELLED" ? "danger" : shipment.state === "DISPATCHED" ? "success" : "info"}>{shipment.state}</Badge> · {shipment.packageCount} paket</p></div>
           {canManage && shipment.recipient && !["CANCELLED"].includes(shipment.state) && <Button variant="secondary" loading={busy} onClick={() => void refresh()}><RefreshCw className="size-4"/> Geliver yenile</Button>}</div>
         <div className="mt-4 grid gap-2 sm:grid-cols-2">{shipment.packages.map((pack) => <div key={pack.id} className="rounded-2xl border border-line p-3 text-sm">
-          <b>Paket {pack.packageNumber}</b><p className="text-muted">{pack.measurementSource} · {pack.dimensionsMm.length}×{pack.dimensionsMm.width}×{pack.dimensionsMm.height} mm · {pack.weightGrams} g</p>
+          <b>Paket {pack.packageNumber}</b><p className="text-muted">{pack.measurementSource} · {pack.dimensionsMm.length / 10}×{pack.dimensionsMm.width / 10}×{pack.dimensionsMm.height / 10} cm · {pack.weightGrams} g</p>
           <p>Booking: {pack.booking ? "hazır" : "bekliyor"} · Etiket: {pack.label ? pack.label.mediaType || "sağlayıcı formatı" : "bekliyor"}</p>
           <p>Takip: {pack.booking?.trackingNumber || "henüz atanmadı"}</p>{pack.label && <div className="mt-3 grid grid-cols-2 gap-2"><a className="secondary-button" href={pack.label.reference} target="_blank" rel="noreferrer">Önizle</a>{canPrint && <Button variant="secondary" loading={busy} onClick={() => void printNativeLabel(pack.id)}><Printer className="size-4"/> Yazdır</Button>}</div>}</div>)}</div>
       </Card>
@@ -415,15 +436,23 @@ export default function ShipmentPage() {
         <h2 className="text-lg font-black">Paket ölçümleri ve içerikleri</h2><p className="mt-1 text-xs text-muted">Ölçülen değerleri paket bazında girin; içerik toplamları rezervasyonla eşleşmelidir.</p>
         <div className="mt-4 space-y-4">{packageDrafts.map((draft, index) => <div key={index} className="rounded-2xl border border-line p-4">
           <div className="flex items-center justify-between"><b>Paket {index + 1}</b>{packageDrafts.length > 1 && <Button variant="ghost" size="sm" className="text-danger" onClick={() => setPackageDrafts((items) => items.filter((_, itemIndex) => itemIndex !== index))}>Paketi kaldır</Button>}</div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-4">{(["lengthMm", "widthMm", "heightMm", "weightGrams"] as const).map((key) => <Input key={key} inputMode="numeric"
-            placeholder={({ lengthMm: "Uzunluk mm", widthMm: "Genişlik mm", heightMm: "Yükseklik mm", weightGrams: "Ağırlık g" })[key]} value={draft[key]}
-            onChange={(event) => setPackageDrafts((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, [key]: event.target.value } : item))}/>)}</div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-4">
+            {([
+              ["lengthCm", "Uzunluk cm", "120"],
+              ["widthCm", "Genişlik cm", "21"],
+              ["heightCm", "Yükseklik cm", "12"],
+            ] as const).map(([key, label, placeholder]) => <Input key={key} type="number" inputMode="decimal" min="0.1" step="0.1"
+              label={label} placeholder={placeholder} value={draft[key]}
+              onChange={(event) => setPackageDrafts((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, [key]: event.target.value } : item))}/>)}
+            <Input type="number" inputMode="numeric" min="1" step="1" label="Ağırlık g" placeholder="500" value={draft.weightGrams}
+              onChange={(event) => setPackageDrafts((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, weightGrams: event.target.value } : item))}/>
+          </div>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">{shipment.requiredContents.map((content) => <label key={content.productId} className="text-xs font-bold">{content.sku} · {content.title}
             <Input containerClassName="mt-1" inputMode="numeric" value={draft.contents[content.productId] || "0"} onChange={(event) => setPackageDrafts((items) => items.map((item, itemIndex) => itemIndex === index
               ? { ...item, contents: { ...item.contents, [content.productId]: event.target.value } } : item))}/></label>)}</div>
         </div>)}</div>
         <div className="mt-4 flex gap-2"><Button variant="secondary" onClick={() => setPackageDrafts((items) => [...items, defaultDraft(shipment, false)])}>Paket ekle</Button>
-          <Button loading={busy} disabled={packageDrafts.some((item) => !item.lengthMm || !item.widthMm || !item.heightMm || !item.weightGrams)} onClick={() => void definePackages()}>Paketleri kaydet</Button></div>
+          <Button loading={busy} disabled={packageDrafts.length === 0 || packageDrafts.some((item) => validPackageMeasurement(item) === null)} onClick={() => void definePackages()}>Paketleri kaydet</Button></div>
       </Card>}
       {canManage && shipment.state === "PREPARING" && shipment.packageCount > 0 && livePackages.length === 0 && <Card as="section" padding="lg" className="rounded-3xl">
         <div className="flex items-center gap-2"><Truck/><h2 className="text-lg font-black">Geliver alıcı ve canlı teklifler</h2></div>

@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { shipmentApi } from "../lib/api";
 import type { ShipmentSummaryV1, ShipmentV1 } from "../types/warehouse";
-import ShipmentPage, { shipmentDiagnosticStageLabel } from "./ShipmentPage";
+import ShipmentPage, { centimetersToMillimeters, shipmentDiagnosticStageLabel } from "./ShipmentPage";
 
 const permissionState = vi.hoisted(() => ({ dispatch: true }));
 vi.mock("../features/auth/AuthContext", () => ({
@@ -17,7 +17,7 @@ const shipment: ShipmentV1 = {
   reservationId: "reservation-1", state: "LABEL_READY", packageCount: 1,
   requiredContents: [{ productId: "product-1", sku: "SKU-1", title: "Raf seti", quantityBaseInt: 1, baseUomCode: "piece" }],
   recipient: { name: "Ayşe", email: "ayse@example.com", phone: null, address1: "Adres", address2: null, countryCode: "TR", cityName: "İstanbul", cityCode: "34", districtName: "Kadıköy", districtID: null, zip: null },
-  packages: [{ id: "package-1", packageNumber: 1, measurementSource: "MEASURED", dimensionsMm: { length: 100, width: 100, height: 100 }, weightGrams: 500, contents: [{ productId: "product-1", quantityBaseInt: 1 }], booking: { providerShipmentId: "provider-1", providerTransactionId: null, barcode: null, carrierCode: "carrier", serviceCode: "service", trackingNumber: "TRACK-1", trackingUrl: null }, label: null }],
+  packages: [{ id: "package-1", packageNumber: 1, measurementSource: "MEASURED", dimensionsMm: { length: 1200, width: 210, height: 120 }, weightGrams: 500, contents: [{ productId: "product-1", quantityBaseInt: 1 }], booking: { providerShipmentId: "provider-1", providerTransactionId: null, barcode: null, carrierCode: "carrier", serviceCode: "service", trackingNumber: "TRACK-1", trackingUrl: null }, label: null }],
   carrierSelection: null, handedOffAt: null, dispatchedAt: null, activeDiagnostic: null,
 };
 
@@ -38,9 +38,59 @@ describe("ShipmentPage", () => {
     render(<MemoryRouter initialEntries={["/shipments?shipmentId=shipment-1"]}><ShipmentPage/></MemoryRouter>);
     expect(await screen.findByText("DS-1042")).toBeInTheDocument();
     expect(screen.getByText("LABEL_READY")).toBeInTheDocument();
+    expect(screen.getByText(/120×21×12 cm/)).toBeInTheDocument();
     expect(screen.queryByLabelText("Aktif sevkiyat uyarısı")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Fiziksel teslimi doğrula" })).toBeDisabled();
     expect(shipmentApi.get).toHaveBeenCalledWith("shipment-1");
+  });
+
+  it("cm ölçülerini Panel API contract'ı için mm'ye çevirir", async () => {
+    const user = userEvent.setup();
+    vi.mocked(shipmentApi.get).mockResolvedValue({ ...shipment, state: "PREPARING", packageCount: 0, packages: [] });
+    const definePackages = vi.spyOn(shipmentApi, "definePackages").mockResolvedValue([]);
+
+    render(<MemoryRouter initialEntries={["/shipments?shipmentId=shipment-1"]}><ShipmentPage/></MemoryRouter>);
+
+    await user.type(await screen.findByLabelText("Uzunluk cm"), "120");
+    await user.type(screen.getByLabelText("Genişlik cm"), "21");
+    await user.type(screen.getByLabelText("Yükseklik cm"), "12.5");
+    await user.type(screen.getByLabelText("Ağırlık g"), "500");
+    await user.click(screen.getByRole("button", { name: "Paketleri kaydet" }));
+
+    await waitFor(() => expect(definePackages).toHaveBeenCalledTimes(1));
+    expect(definePackages).toHaveBeenCalledWith("shipment-1", [expect.objectContaining({
+      measured: { lengthMm: 1200, widthMm: 210, heightMm: 125, weightGrams: 500 },
+    })]);
+  });
+
+  it("geçersiz, sıfır veya negatif cm ölçüsünü kaydetmez", async () => {
+    const user = userEvent.setup();
+    vi.mocked(shipmentApi.get).mockResolvedValue({ ...shipment, state: "PREPARING", packageCount: 0, packages: [] });
+    const definePackages = vi.spyOn(shipmentApi, "definePackages").mockResolvedValue([]);
+
+    render(<MemoryRouter initialEntries={["/shipments?shipmentId=shipment-1"]}><ShipmentPage/></MemoryRouter>);
+
+    const lengthInput = await screen.findByLabelText("Uzunluk cm");
+    await user.type(screen.getByLabelText("Genişlik cm"), "21");
+    await user.type(screen.getByLabelText("Yükseklik cm"), "12.5");
+    await user.type(screen.getByLabelText("Ağırlık g"), "500");
+    const saveButton = screen.getByRole("button", { name: "Paketleri kaydet" });
+
+    for (const invalidValue of ["0", "-1", "12.55"]) {
+      await user.clear(lengthInput);
+      await user.type(lengthInput, invalidValue);
+      expect(saveButton).toBeDisabled();
+    }
+    expect(definePackages).not.toHaveBeenCalled();
+  });
+
+  it("cm hassasiyetini 0.1 adımla mm tam sayısına dönüştürür", () => {
+    expect(centimetersToMillimeters("120")).toBe(1200);
+    expect(centimetersToMillimeters("21")).toBe(210);
+    expect(centimetersToMillimeters("12.5")).toBe(125);
+    expect(centimetersToMillimeters("0")).toBeNull();
+    expect(centimetersToMillimeters("-1")).toBeNull();
+    expect(centimetersToMillimeters("12.55")).toBeNull();
   });
 
   it("liste item'ında Panel diagnostic alanlarını güvenli biçimde gösterir", async () => {
