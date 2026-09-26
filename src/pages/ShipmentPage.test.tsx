@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { shipmentApi } from "../lib/api";
 import type { ShipmentSummaryV1, ShipmentV1 } from "../types/warehouse";
-import ShipmentPage from "./ShipmentPage";
+import ShipmentPage, { shipmentDiagnosticStageLabel } from "./ShipmentPage";
 
 const permissionState = vi.hoisted(() => ({ dispatch: true }));
 vi.mock("../features/auth/AuthContext", () => ({
@@ -18,13 +18,13 @@ const shipment: ShipmentV1 = {
   requiredContents: [{ productId: "product-1", sku: "SKU-1", title: "Raf seti", quantityBaseInt: 1, baseUomCode: "piece" }],
   recipient: { name: "Ayşe", email: "ayse@example.com", phone: null, address1: "Adres", address2: null, countryCode: "TR", cityName: "İstanbul", cityCode: "34", districtName: "Kadıköy", districtID: null, zip: null },
   packages: [{ id: "package-1", packageNumber: 1, measurementSource: "MEASURED", dimensionsMm: { length: 100, width: 100, height: 100 }, weightGrams: 500, contents: [{ productId: "product-1", quantityBaseInt: 1 }], booking: { providerShipmentId: "provider-1", providerTransactionId: null, barcode: null, carrierCode: "carrier", serviceCode: "service", trackingNumber: "TRACK-1", trackingUrl: null }, label: null }],
-  carrierSelection: null, handedOffAt: null, dispatchedAt: null,
+  carrierSelection: null, handedOffAt: null, dispatchedAt: null, activeDiagnostic: null,
 };
 
 const queue: ShipmentSummaryV1[] = [
-  { id: "shipment-ready-1", orderId: "order-1", orderNumber: "DS-1001", sourceChannel: "SHOPIFY", reservationId: "reservation-1", state: "LABEL_READY", packageCount: 1, customerName: "Ayşe", createdAt: "2026-09-26T08:00:00.000Z", updatedAt: "2026-09-26T08:00:00.000Z" },
-  { id: "shipment-ready-2", orderId: "order-2", orderNumber: "DS-1002", sourceChannel: "TRENDYOL", reservationId: "reservation-2", state: "LABEL_READY", packageCount: 2, customerName: "Bora", createdAt: "2026-09-26T08:00:00.000Z", updatedAt: "2026-09-26T08:00:00.000Z" },
-  { id: "shipment-preparing", orderId: "order-3", orderNumber: "DS-1003", sourceChannel: "PANEL", reservationId: "reservation-3", state: "PREPARING", packageCount: 1, customerName: "Cem", createdAt: "2026-09-26T08:00:00.000Z", updatedAt: "2026-09-26T08:00:00.000Z" },
+  { id: "shipment-ready-1", orderId: "order-1", orderNumber: "DS-1001", sourceChannel: "SHOPIFY", reservationId: "reservation-1", state: "LABEL_READY", packageCount: 1, customerName: "Ayşe", createdAt: "2026-09-26T08:00:00.000Z", updatedAt: "2026-09-26T08:00:00.000Z", activeDiagnostic: null },
+  { id: "shipment-ready-2", orderId: "order-2", orderNumber: "DS-1002", sourceChannel: "TRENDYOL", reservationId: "reservation-2", state: "LABEL_READY", packageCount: 2, customerName: "Bora", createdAt: "2026-09-26T08:00:00.000Z", updatedAt: "2026-09-26T08:00:00.000Z", activeDiagnostic: null },
+  { id: "shipment-preparing", orderId: "order-3", orderNumber: "DS-1003", sourceChannel: "PANEL", reservationId: "reservation-3", state: "PREPARING", packageCount: 1, customerName: "Cem", createdAt: "2026-09-26T08:00:00.000Z", updatedAt: "2026-09-26T08:00:00.000Z", activeDiagnostic: null },
 ];
 
 describe("ShipmentPage", () => {
@@ -38,8 +38,47 @@ describe("ShipmentPage", () => {
     render(<MemoryRouter initialEntries={["/shipments?shipmentId=shipment-1"]}><ShipmentPage/></MemoryRouter>);
     expect(await screen.findByText("DS-1042")).toBeInTheDocument();
     expect(screen.getByText("LABEL_READY")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Aktif sevkiyat uyarısı")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Fiziksel teslimi doğrula" })).toBeDisabled();
     expect(shipmentApi.get).toHaveBeenCalledWith("shipment-1");
+  });
+
+  it("liste item'ında Panel diagnostic alanlarını güvenli biçimde gösterir", async () => {
+    vi.mocked(shipmentApi.list).mockResolvedValue([{ ...queue[0], state: "EXCEPTION", activeDiagnostic: {
+      code: "PROVIDER_BOOKING_BLOCKED",
+      stage: "provider",
+      message: "Kargo sağlayıcı işlemi durdurdu. Operatör kontrolü gerekiyor.",
+    } }]);
+
+    render(<MemoryRouter initialEntries={["/shipments"]}><ShipmentPage/></MemoryRouter>);
+
+    const warning = await screen.findByLabelText("Sevkiyat uyarısı");
+    expect(warning).toHaveTextContent("Kargo Sağlayıcı");
+    expect(warning).toHaveTextContent("PROVIDER_BOOKING_BLOCKED");
+    expect(warning).toHaveTextContent("Kargo sağlayıcı işlemi durdurdu. Operatör kontrolü gerekiyor.");
+  });
+
+  it("shipment detail diagnostic card'ını gösterir", async () => {
+    vi.mocked(shipmentApi.get).mockResolvedValue({ ...shipment, state: "EXCEPTION", activeDiagnostic: {
+      code: "BOOKING_OUTCOME_UNCERTAIN",
+      stage: "booking",
+      message: "Kargo rezervasyon sonucu belirsiz. Otomatik yeniden deneme durduruldu.",
+    } });
+
+    render(<MemoryRouter initialEntries={["/shipments?shipmentId=shipment-1"]}><ShipmentPage/></MemoryRouter>);
+
+    const diagnosticCard = await screen.findByLabelText("Aktif sevkiyat uyarısı");
+    expect(diagnosticCard).toHaveTextContent("Kargo Rezervasyonu");
+    expect(diagnosticCard).toHaveTextContent("BOOKING_OUTCOME_UNCERTAIN");
+    expect(diagnosticCard).toHaveTextContent("Kargo rezervasyon sonucu belirsiz. Otomatik yeniden deneme durduruldu.");
+  });
+
+  it("diagnostic stage değerlerini Türkçe etiketlere map eder", () => {
+    expect(shipmentDiagnosticStageLabel("tracking_outbound")).toBe("Kanal / Tracking");
+    expect(shipmentDiagnosticStageLabel("provider")).toBe("Kargo Sağlayıcı");
+    expect(shipmentDiagnosticStageLabel("booking")).toBe("Kargo Rezervasyonu");
+    expect(shipmentDiagnosticStageLabel("label")).toBe("Etiket");
+    expect(shipmentDiagnosticStageLabel("other")).toBe("Diğer");
   });
 
   it("yalnız LABEL_READY shipment'ları seçer ve partial sonucu gösterip başarısız seçimi korur", async () => {
@@ -57,6 +96,7 @@ describe("ShipmentPage", () => {
     const first = await screen.findByRole("checkbox", { name: "DS-1001 sevkiyatını seç" });
     const second = screen.getByRole("checkbox", { name: "DS-1002 sevkiyatını seç" });
     expect(screen.queryByRole("checkbox", { name: "DS-1003 sevkiyatını seç" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Sevkiyat uyarısı")).not.toBeInTheDocument();
 
     await user.click(first);
     await user.click(second);

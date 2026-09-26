@@ -3,12 +3,22 @@ import { useSearchParams } from "react-router-dom";
 import { PackageCheck, Printer, RefreshCw, Truck, XCircle } from "lucide-react";
 import { hasWarehousePermission, useAuth } from "../features/auth/AuthContext";
 import { shipmentApi } from "../lib/api";
-import type { BulkHandoffResponseV1, GeliverLivePackage, ShipmentSummaryV1, ShipmentV1 } from "../types/warehouse";
+import type { BulkHandoffResponseV1, GeliverLivePackage, ShipmentDiagnosticStage, ShipmentSummaryV1, ShipmentV1 } from "../types/warehouse";
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Input, LoadingState, PageHeader } from "../components/ui";
 
 type PackageDraft = { lengthMm: string; widthMm: string; heightMm: string; weightGrams: string; contents: Record<string, string> };
 const emptyRecipient = { name: "", email: "", phone: "", address1: "", address2: "", countryCode: "TR",
   cityName: "", cityCode: "", districtName: "", districtID: "", zip: "" };
+
+const shipmentDiagnosticStageLabels: Record<ShipmentDiagnosticStage, string> = {
+  tracking_outbound: "Kanal / Tracking",
+  provider: "Kargo Sağlayıcı",
+  booking: "Kargo Rezervasyonu",
+  label: "Etiket",
+  other: "Diğer",
+};
+
+export const shipmentDiagnosticStageLabel = (stage: ShipmentDiagnosticStage) => shipmentDiagnosticStageLabels[stage];
 
 export default function ShipmentPage() {
   const { user } = useAuth();
@@ -317,28 +327,37 @@ export default function ShipmentPage() {
             onChange={() => toggleShipmentSelection(item)}
           />}
           <button
-            className="grid min-w-0 flex-1 gap-2 text-left sm:grid-cols-[1.3fr_1fr_1fr_auto]"
+            className="min-w-0 flex-1 text-left"
             onClick={() => void loadById(item.id)}
           >
-            <div className="min-w-0">
-              <p className="font-black">{item.orderNumber || item.id}</p>
-              <p className="mt-1 break-all text-xs text-muted">{item.id}</p>
-            </div>
+            <div className="grid gap-2 sm:grid-cols-[1.3fr_1fr_1fr_auto]">
+              <div className="min-w-0">
+                <p className="font-black">{item.orderNumber || item.id}</p>
+                <p className="mt-1 break-all text-xs text-muted">{item.id}</p>
+              </div>
 
-            <div>
-              <p className="text-xs font-black uppercase tracking-wide text-muted">Müşteri</p>
-              <p className="mt-1 text-sm font-bold">{item.customerName || "—"}</p>
-            </div>
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-muted">Müşteri</p>
+                <p className="mt-1 text-sm font-bold">{item.customerName || "—"}</p>
+              </div>
 
-            <div>
-              <p className="text-xs font-black uppercase tracking-wide text-muted">Kanal</p>
-              <p className="mt-1 text-sm font-bold">{item.sourceChannel}</p>
-            </div>
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-muted">Kanal</p>
+                <p className="mt-1 text-sm font-bold">{item.sourceChannel}</p>
+              </div>
 
-            <div className="sm:text-right">
-              <p className="font-black">{shipmentStateLabel(item.state)}</p>
-              <p className="mt-1 text-xs text-muted">{item.packageCount} paket</p>
+              <div className="sm:text-right">
+                <p className="font-black">{shipmentStateLabel(item.state)}</p>
+                <p className="mt-1 text-xs text-muted">{item.packageCount} paket</p>
+              </div>
             </div>
+            {item.activeDiagnostic && <div aria-label="Sevkiyat uyarısı" className="mt-3 rounded-xl border border-danger/30 bg-red-50 px-3 py-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="danger">{shipmentDiagnosticStageLabel(item.activeDiagnostic.stage)}</Badge>
+                <span className="text-xs font-mono text-muted">{item.activeDiagnostic.code}</span>
+              </div>
+              <p className="mt-1 text-sm font-bold text-danger">{item.activeDiagnostic.message}</p>
+            </div>}
           </button>
         </div>)}
       </div>
@@ -384,6 +403,14 @@ export default function ShipmentPage() {
           <p>Booking: {pack.booking ? "hazır" : "bekliyor"} · Etiket: {pack.label ? pack.label.mediaType || "sağlayıcı formatı" : "bekliyor"}</p>
           <p>Takip: {pack.booking?.trackingNumber || "henüz atanmadı"}</p>{pack.label && <div className="mt-3 grid grid-cols-2 gap-2"><a className="secondary-button" href={pack.label.reference} target="_blank" rel="noreferrer">Önizle</a>{canPrint && <Button variant="secondary" loading={busy} onClick={() => void printNativeLabel(pack.id)}><Printer className="size-4"/> Yazdır</Button>}</div>}</div>)}</div>
       </Card>
+      {shipment.activeDiagnostic && <Card as="section" padding="lg" className="rounded-3xl border-danger/30 bg-red-50" aria-label="Aktif sevkiyat uyarısı">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="danger">{shipmentDiagnosticStageLabel(shipment.activeDiagnostic.stage)}</Badge>
+          <span className="text-xs font-mono text-muted">{shipment.activeDiagnostic.code}</span>
+        </div>
+        <h2 className="mt-3 text-lg font-black text-danger">Sevkiyat işlemi dikkat gerektiriyor</h2>
+        <p className="mt-1 text-sm font-bold text-ink">{shipment.activeDiagnostic.message}</p>
+      </Card>}
       {canManage && shipment.state === "PREPARING" && shipment.packageCount === 0 && <Card as="section" padding="lg" className="rounded-3xl">
         <h2 className="text-lg font-black">Paket ölçümleri ve içerikleri</h2><p className="mt-1 text-xs text-muted">Ölçülen değerleri paket bazında girin; içerik toplamları rezervasyonla eşleşmelidir.</p>
         <div className="mt-4 space-y-4">{packageDrafts.map((draft, index) => <div key={index} className="rounded-2xl border border-line p-4">

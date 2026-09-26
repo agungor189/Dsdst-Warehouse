@@ -26,6 +26,14 @@ export type WarehousePermission =
 
 export type ShipmentState = "PREPARING" | "CARRIER_SELECTED" | "BOOKED" | "LABEL_READY" | "HANDED_OFF" | "DISPATCHED" | "CANCELLED" | "EXCEPTION";
 
+export type ShipmentDiagnosticStage = "booking" | "provider" | "label" | "tracking_outbound" | "other";
+
+export interface ShipmentActiveDiagnostic {
+  code: string;
+  stage: ShipmentDiagnosticStage;
+  message: string;
+}
+
 export interface ShipmentSummaryV1 {
   id: string;
   orderId: string;
@@ -37,6 +45,7 @@ export interface ShipmentSummaryV1 {
   customerName: string | null;
   createdAt: string;
   updatedAt: string;
+  activeDiagnostic: ShipmentActiveDiagnostic | null;
 }
 
 export interface BulkHandoffResultV1 {
@@ -91,6 +100,7 @@ export interface ShipmentV1 {
   };
   handedOffAt: string | null;
   dispatchedAt: string | null;
+  activeDiagnostic: ShipmentActiveDiagnostic | null;
 }
 
 export interface GeliverLivePackage {
