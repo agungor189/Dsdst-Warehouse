@@ -26,15 +26,15 @@ import type {
   InventoryReservationV1,
   WarehouseExecutionPackage,
   WarehouseExecutionLocation,
-  ShipmentV1, ShipmentSummaryV1, GeliverLivePackage,
+  ShipmentV1, ShipmentSummaryV1, GeliverLivePackage, BulkHandoffResponseV1, BulkHandoffResultV1, BulkHandoffSummaryV1,
 } from "../types/warehouse";
 import type { ReceivingLot, ReceivingSession } from "../types/warehouse";
 
-interface ApiEnvelope<T> {
+interface ApiEnvelope<T, TSummary = PickHistorySummary> {
   success: boolean;
   data: T;
   pagination?: Pagination;
-  summary?: PickHistorySummary;
+  summary?: TSummary;
   filters?: { users: PickSessionUser[] };
   idempotent?: boolean;
   error?: { code?: string; message?: string };
@@ -58,7 +58,7 @@ export class ApiError extends Error {
   }
 }
 
-const request = async <T>(path: string, init: RequestInit = {}): Promise<ApiEnvelope<T>> => {
+const request = async <T, TSummary = PickHistorySummary>(path: string, init: RequestInit = {}): Promise<ApiEnvelope<T, TSummary>> => {
   if (init.method && init.method !== "GET" && !navigator.onLine) {
     throw new ApiError("Panel bağlantısı yok. Çevrimdışıyken işlem yapılamaz.", undefined, "OFFLINE");
   }
@@ -78,7 +78,7 @@ const request = async <T>(path: string, init: RequestInit = {}): Promise<ApiEnve
     throw new ApiError("Panel bağlantısı yok. Ağ bağlantısını kontrol edin.", undefined, "NETWORK_ERROR");
   }
 
-  const body = (await response.json().catch(() => ({}))) as Partial<ApiEnvelope<T>>;
+  const body = (await response.json().catch(() => ({}))) as Partial<ApiEnvelope<T, TSummary>>;
   if (!response.ok) {
     if (response.status === 401 && path !== "/auth/login" && path !== "/auth/me") {
       window.dispatchEvent(new Event("warehouse:unauthorized"));
@@ -89,7 +89,7 @@ const request = async <T>(path: string, init: RequestInit = {}): Promise<ApiEnve
       body.error?.code,
     );
   }
-  return body as ApiEnvelope<T>;
+  return body as ApiEnvelope<T, TSummary>;
 };
 
 const requestPdf = async (path: string, body: Record<string, unknown>): Promise<Blob> => {
@@ -318,6 +318,18 @@ export const shipmentApi = {
           currency: input.currency || "TRY", provenance: { source: "GELIVER_ACTUAL_CHARGE", reference: input.chargeReference || input.evidenceReference } } }),
         idempotency_key: inventoryOperation() }),
     })).data;
+  },
+  async bulkHandoff(input: { shipmentIds: string[]; handedOffAt: string; evidenceReference: string }, operationId: string): Promise<BulkHandoffResponseV1> {
+    const response = await request<BulkHandoffResultV1[], BulkHandoffSummaryV1>("/shipping/v1/shipments/bulk-handoff", {
+      method: "POST",
+      headers: { "x-operation-id": operationId },
+      body: JSON.stringify({
+        shipmentIds: input.shipmentIds,
+        handedOffAt: input.handedOffAt,
+        handoffEvidence: { kind: "OPERATOR_CARRIER_HANDOFF", reference: input.evidenceReference },
+      }),
+    });
+    return { results: response.data, summary: response.summary! };
   },
 };
 

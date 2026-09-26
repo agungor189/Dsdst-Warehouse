@@ -155,6 +155,50 @@ describe("Warehouse BFF", () => {
     } });
   });
 
+  it("bulk handoff body, operation identity ve session'ı Panel core shipping endpoint'ine iletir", async () => {
+    let received: { path?: string; body?: unknown; operationId?: string; authorization?: string; key?: string } = {};
+    const panelUrl = await startPanel((req, res) => {
+      received = {
+        path: req.path,
+        body: req.body,
+        operationId: req.header("x-operation-id"),
+        authorization: req.header("authorization"),
+        key: req.header("x-api-key"),
+      };
+      res.json({
+        success: true,
+        contract: "dsdst.shipment-bulk-handoff.v1",
+        data: [{ shipmentId: "ship-1", orderNumber: "DS-1", success: true, resultingState: "DISPATCHED" }],
+        summary: { requested: 1, dispatched: 1, failed: 0, alreadyProcessed: 0 },
+      });
+    });
+
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .post("/api/shipping/v1/shipments/bulk-handoff")
+      .set("Cookie", sessionCookie)
+      .set("Origin", TRUSTED_ORIGIN)
+      .set("x-operation-id", "warehouse-bulk-handoff:op-1")
+      .send({
+        shipmentIds: ["ship-1"],
+        handedOffAt: "2026-09-26T12:00:00.000Z",
+        handoffEvidence: { kind: "OPERATOR_CARRIER_HANDOFF", reference: "dock-7", unsafe: "drop" },
+        central_stock: -99,
+      });
+
+    expect(response.status).toBe(200);
+    expect(received).toEqual({
+      path: "/api/shipping/v1/shipments/bulk-handoff",
+      body: {
+        shipmentIds: ["ship-1"],
+        handedOffAt: "2026-09-26T12:00:00.000Z",
+        handoffEvidence: { kind: "OPERATOR_CARRIER_HANDOFF", reference: "dock-7" },
+      },
+      operationId: "warehouse-bulk-handoff:op-1",
+      authorization: `Bearer ${SESSION}`,
+      key: SECRET,
+    });
+  });
+
   it("V2-13 rejects COD locally and does not call Panel", async () => {
     let called = false;
     const panelUrl = await startPanel((_req, res) => { called = true; res.status(500).end(); });

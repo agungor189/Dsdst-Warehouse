@@ -39,6 +39,28 @@ export interface ShipmentSummaryV1 {
   updatedAt: string;
 }
 
+export interface BulkHandoffResultV1 {
+  shipmentId: string;
+  orderNumber: string | null;
+  success: boolean;
+  resultingState: ShipmentState | null;
+  replayed?: boolean;
+  errorCode?: string;
+  message?: string;
+}
+
+export interface BulkHandoffSummaryV1 {
+  requested: number;
+  dispatched: number;
+  failed: number;
+  alreadyProcessed: number;
+}
+
+export interface BulkHandoffResponseV1 {
+  results: BulkHandoffResultV1[];
+  summary: BulkHandoffSummaryV1;
+}
+
 export interface ShipmentV1 {
   id: string;
   orderId: string;

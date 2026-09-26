@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { catalogApi, warehouseApi } from "./api";
+import { catalogApi, shipmentApi, warehouseApi } from "./api";
 import { order, orderSummary, pickPlan } from "../test/fixtures";
 
 const response = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(body), {
@@ -95,6 +95,30 @@ describe("Warehouse API client", () => {
     expect(fetch).toHaveBeenCalledWith("/api/orders/order-1/complete", expect.objectContaining({
       method: "POST",
       body: JSON.stringify({ note: "Kırılabilir" }),
+    }));
+  });
+
+  it("bulk handoff request body ve operation header'ını aynı-origin BFF'ye gönderir", async () => {
+    vi.mocked(fetch).mockImplementation(() => response({
+      success: true,
+      data: [{ shipmentId: "shipment-1", orderNumber: "DS-1042", success: true, resultingState: "DISPATCHED" }],
+      summary: { requested: 1, dispatched: 1, failed: 0, alreadyProcessed: 0 },
+    }));
+
+    await shipmentApi.bulkHandoff({
+      shipmentIds: ["shipment-1"],
+      handedOffAt: "2026-09-26T12:00:00.000Z",
+      evidenceReference: "dock-7",
+    }, "warehouse-bulk-handoff:op-1");
+
+    expect(fetch).toHaveBeenCalledWith("/api/shipping/v1/shipments/bulk-handoff", expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({ "x-operation-id": "warehouse-bulk-handoff:op-1" }),
+      body: JSON.stringify({
+        shipmentIds: ["shipment-1"],
+        handedOffAt: "2026-09-26T12:00:00.000Z",
+        handoffEvidence: { kind: "OPERATOR_CARRIER_HANDOFF", reference: "dock-7" },
+      }),
     }));
   });
 });

@@ -399,17 +399,20 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     query?: URLSearchParams,
     body?: Record<string, unknown>,
     binary = false,
+    apiPrefix = "/api/warehouse/v1",
+    extraHeaders: Record<string, string> = {},
   ) => {
     if (configurationFailure(res)) return;
     const sessionToken = String(res.locals.sessionToken);
     const baseUrl = config.panelApiBaseUrl!.replace(/\/$/, "");
-    const target = new URL(`${baseUrl}/api/warehouse/v1${upstreamPath}`);
+    const target = new URL(`${baseUrl}${apiPrefix}${upstreamPath}`);
     if (query) target.search = query.toString();
     const upstream = await fetchPanel(res, target, {
       method,
       headers: {
         Accept: binary ? "image/*" : "application/json",
         ...(body ? { "Content-Type": "application/json" } : {}),
+        ...extraHeaders,
         "x-api-key": config.warehouseApiKey!,
         Authorization: `Bearer ${sessionToken}`,
       },
@@ -578,6 +581,21 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
       cancelledAt: safeQueryText(req.body?.cancelledAt, 50) || null,
       idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
     }));
+  app.post("/api/shipping/v1/shipments/bulk-handoff", requireSession, (req, res) => {
+    const operationId = safeQueryText(req.headers["x-operation-id"], 200);
+    const shipmentIds = Array.isArray(req.body?.shipmentIds)
+      ? req.body.shipmentIds.map((value: unknown) => safeQueryText(value, 500))
+      : [];
+
+    return forward(req, res, "POST", "/shipments/bulk-handoff", undefined, {
+      shipmentIds,
+      handedOffAt: safeQueryText(req.body?.handedOffAt, 50),
+      handoffEvidence: {
+        kind: safeQueryText(req.body?.handoffEvidence?.kind, 100),
+        reference: safeQueryText(req.body?.handoffEvidence?.reference, 500),
+      },
+    }, false, "/api/shipping/v1", operationId ? { "x-operation-id": operationId } : {});
+  });
   app.post("/api/shipping/v1/shipments/:id/handoff", requireSession, (req, res) =>
     forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/handoff`, undefined, {
       handedOffAt: safeQueryText(req.body?.handedOffAt, 50),

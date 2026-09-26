@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { PackageCheck, Printer, RefreshCw, Truck, XCircle } from "lucide-react";
 import { hasWarehousePermission, useAuth } from "../features/auth/AuthContext";
 import { shipmentApi } from "../lib/api";
-import type { GeliverLivePackage, ShipmentSummaryV1, ShipmentV1 } from "../types/warehouse";
-import { Badge, Button, Card, EmptyState, Input, LoadingState, PageHeader } from "../components/ui";
+import type { BulkHandoffResponseV1, GeliverLivePackage, ShipmentSummaryV1, ShipmentV1 } from "../types/warehouse";
+import { Badge, Button, Card, ConfirmDialog, EmptyState, Input, LoadingState, PageHeader } from "../components/ui";
 
 type PackageDraft = { lengthMm: string; widthMm: string; heightMm: string; weightGrams: string; contents: Record<string, string> };
 const emptyRecipient = { name: "", email: "", phone: "", address1: "", address2: "", countryCode: "TR",
@@ -19,6 +19,12 @@ export default function ShipmentPage() {
   const [shipmentScope, setShipmentScope] = useState<"pending" | "completed" | "all">("pending");
   const [shipmentSearch, setShipmentSearch] = useState("");
   const [listBusy, setListBusy] = useState(false);
+  const [selectedShipmentIds, setSelectedShipmentIds] = useState<string[]>([]);
+  const [bulkEvidence, setBulkEvidence] = useState("");
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState<BulkHandoffResponseV1 | null>(null);
+  const bulkSubmitting = useRef(false);
   const [packageDrafts, setPackageDrafts] = useState<PackageDraft[]>([]);
   const [recipient, setRecipient] = useState(emptyRecipient);
   const [livePackages, setLivePackages] = useState<GeliverLivePackage[]>([]);
@@ -191,6 +197,52 @@ export default function ShipmentPage() {
     EXCEPTION: "Sorunlu",
   })[state] || state;
 
+  const readyVisibleShipments = visibleShipments.filter((item) => item.state === "LABEL_READY");
+  const selectedShipmentIdsSet = new Set(selectedShipmentIds);
+
+  const toggleShipmentSelection = (item: ShipmentSummaryV1) => {
+    if (!canDispatch || item.state !== "LABEL_READY" || bulkBusy) return;
+    setBulkResult(null);
+    setSelectedShipmentIds((current) => {
+      if (current.includes(item.id)) return current.filter((id) => id !== item.id);
+      if (current.length >= 50) {
+        setFeedback("Tek toplu sevk işleminde en fazla 50 shipment seçilebilir.");
+        return current;
+      }
+      return [...current, item.id];
+    });
+  };
+
+  const selectAllReady = () => {
+    setBulkResult(null);
+    setSelectedShipmentIds(readyVisibleShipments.slice(0, 50).map((item) => item.id));
+    if (readyVisibleShipments.length > 50) setFeedback("İlk 50 sevke hazır shipment seçildi.");
+  };
+
+  const submitBulkHandoff = async () => {
+    if (bulkSubmitting.current || selectedShipmentIds.length === 0 || !bulkEvidence.trim()) return;
+    bulkSubmitting.current = true;
+    setBulkBusy(true);
+    setFeedback("");
+    try {
+      const result = await shipmentApi.bulkHandoff({
+        shipmentIds: selectedShipmentIds,
+        handedOffAt: new Date().toISOString(),
+        evidenceReference: bulkEvidence.trim(),
+      }, `warehouse-bulk-handoff:${crypto.randomUUID()}`);
+      setBulkResult(result);
+      setSelectedShipmentIds(result.results.filter((item) => !item.success).map((item) => item.shipmentId));
+      setBulkConfirmOpen(false);
+      setFeedback("Toplu fiziksel teslim işlemi tamamlandı; sonuçlar shipment bazında gösteriliyor.");
+      await loadShipments(true);
+    } catch (error: any) {
+      setFeedback(error.message);
+    } finally {
+      bulkSubmitting.current = false;
+      setBulkBusy(false);
+    }
+  };
+
   const cancellable = shipment && !["HANDED_OFF", "DISPATCHED", "CANCELLED"].includes(shipment.state);
   return <div className="space-y-5 pt-4">
     <PageHeader eyebrow="V2-13" title="Sevkiyat & Geliver" description="Canlı teklif seçimi operatöre aittir. Booking, etiket ve takip stok düşmez; yalnız fiziksel teslim dispatch yapar."/>
@@ -222,6 +274,20 @@ export default function ShipmentPage() {
         ))}
       </div>
 
+      {canDispatch && <div className="mt-4 rounded-2xl border border-line bg-canvas p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" size="sm" disabled={bulkBusy || readyVisibleShipments.length === 0} onClick={selectAllReady}>Tüm Sevke Hazırları Seç</Button>
+            <Button variant="ghost" size="sm" disabled={bulkBusy || selectedShipmentIds.length === 0} onClick={() => { setSelectedShipmentIds([]); setBulkResult(null); }}>Seçimi temizle</Button>
+            <Badge variant={selectedShipmentIds.length ? "info" : "default"}>{selectedShipmentIds.length} / 50 seçili</Badge>
+          </div>
+          <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(16rem,1fr)_auto] lg:w-[34rem]">
+            <Input label="Ortak teslim kanıtı / referansı" required disabled={bulkBusy} value={bulkEvidence} onChange={(event) => setBulkEvidence(event.target.value)} placeholder="Tutanak, teslim fişi veya taşıyıcı referansı"/>
+            <Button className="self-end" loading={bulkBusy} disabled={selectedShipmentIds.length === 0 || !bulkEvidence.trim()} onClick={() => setBulkConfirmOpen(true)}>Toplu Sevk</Button>
+          </div>
+        </div>
+      </div>}
+
       <Input
         containerClassName="mt-4"
         value={shipmentSearch}
@@ -238,13 +304,23 @@ export default function ShipmentPage() {
           <EmptyState title="Bu filtrede sevkiyat bulunamadı."/>
         )}
 
-        {visibleShipments.map((item) => (
+        {visibleShipments.map((item) => <div
+          key={item.id}
+          className={`flex items-center gap-3 rounded-2xl border border-line p-4 transition hover:bg-canvas ${selectedShipmentIdsSet.has(item.id) ? "bg-acid/10" : ""}`}
+        >
+          {canDispatch && item.state === "LABEL_READY" && <input
+            type="checkbox"
+            className="size-5 shrink-0 accent-forest"
+            aria-label={`${item.orderNumber || item.id} sevkiyatını seç`}
+            checked={selectedShipmentIdsSet.has(item.id)}
+            disabled={bulkBusy}
+            onChange={() => toggleShipmentSelection(item)}
+          />}
           <button
-            key={item.id}
-            className="grid w-full gap-2 rounded-2xl border border-line p-4 text-left transition hover:bg-canvas sm:grid-cols-[1.3fr_1fr_1fr_auto]"
+            className="grid min-w-0 flex-1 gap-2 text-left sm:grid-cols-[1.3fr_1fr_1fr_auto]"
             onClick={() => void loadById(item.id)}
           >
-            <div>
+            <div className="min-w-0">
               <p className="font-black">{item.orderNumber || item.id}</p>
               <p className="mt-1 break-all text-xs text-muted">{item.id}</p>
             </div>
@@ -264,9 +340,25 @@ export default function ShipmentPage() {
               <p className="mt-1 text-xs text-muted">{item.packageCount} paket</p>
             </div>
           </button>
-        ))}
+        </div>)}
       </div>
     </Card>
+
+    {bulkResult && <Card as="section" padding="lg" className="rounded-3xl" aria-live="polite">
+      <h2 className="text-lg font-black">Toplu sevk sonucu</h2>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Badge variant="success">Başarılı: {bulkResult.summary.dispatched}</Badge>
+        <Badge variant={bulkResult.summary.failed ? "danger" : "default"}>Başarısız: {bulkResult.summary.failed}</Badge>
+        <Badge variant="info">Daha önce işlenmiş: {bulkResult.summary.alreadyProcessed}</Badge>
+      </div>
+      {bulkResult.results.some((item) => !item.success) && <div className="mt-4 space-y-2">
+        <p className="text-sm font-black">Başarısız shipment'lar yeniden denemek için seçili bırakıldı.</p>
+        {bulkResult.results.filter((item) => !item.success).map((item) => <div key={item.shipmentId} className="rounded-xl border border-danger/30 bg-red-50 p-3 text-sm">
+          <p className="font-black">{item.orderNumber || item.shipmentId}</p>
+          <p className="mt-1 text-danger">{item.message || "Shipment sevk edilemedi."}</p>
+        </div>)}
+      </div>}
+    </Card>}
 
     <Card as="section" padding="lg" className="rounded-3xl">
       <div className="flex gap-2">
@@ -347,5 +439,14 @@ export default function ShipmentPage() {
       </Card>}
     </>}
     {feedback && <p role="status" className="rounded-2xl bg-canvas p-4 text-sm font-bold">{feedback}</p>}
+    <ConfirmDialog
+      open={bulkConfirmOpen}
+      onClose={() => { if (!bulkBusy) setBulkConfirmOpen(false); }}
+      onConfirm={submitBulkHandoff}
+      title="Toplu fiziksel sevki onayla"
+      description={`${selectedShipmentIds.length} shipment fiziksel olarak taşıyıcıya teslim edilmiş sayılacak. Bu işlem stok hareketlerini ve finansal kayıtları kesinleştirir. Ortak kanıt: ${bulkEvidence.trim()}`}
+      confirmLabel="Fiziksel teslimi onayla"
+      loading={bulkBusy}
+    />
   </div>;
 }
