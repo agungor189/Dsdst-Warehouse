@@ -8,6 +8,7 @@ import { useAuth } from "../features/auth/AuthContext";
 import { getErrorMessage, warehouseApi } from "../lib/api";
 import { formatDate, platformLabel } from "../lib/format";
 import type { PickPlan, WarehouseOrder } from "../types/warehouse";
+import { Button, Card } from "../components/ui";
 
 export function OrderDetailPage() {
   const { id = "" } = useParams();
@@ -65,7 +66,7 @@ export function OrderDetailPage() {
         <div className="flex gap-3 rounded-2xl border border-danger/20 bg-red-50 p-4 text-danger" role="alert"><TriangleAlert className="shrink-0"/><div><strong className="block">Çözümlenemeyen ürün var</strong><span className="text-sm">{plan.unresolved_items.length} sipariş satırı toplama planına eklenemedi.</span></div></div>
       )}
 
-      <section className="rounded-2xl border border-line bg-white p-4">
+      <Card as="section">
         <div className="mb-3 flex items-center justify-between"><h2 className="font-black">Sipariş satırları</h2><span className="text-sm font-bold text-muted">{order.items.length} satır</span></div>
         <div className="divide-y divide-line">
           {order.items.map((item) => (
@@ -75,12 +76,12 @@ export function OrderDetailPage() {
             </div>
           ))}
         </div>
-      </section>
+      </Card>
 
       {startError && <p className="rounded-xl bg-red-50 p-3 text-sm font-bold text-danger" role="alert">{startError}</p>}
-      <button className="primary-button sticky bottom-4 w-full shadow-xl" disabled={starting || blocked} onClick={start}>
+      <Button className="sticky bottom-4 w-full shadow-xl" loading={starting} disabled={blocked} onClick={start}>
         <Play size={22} fill="currentColor" /> {starting ? "Başlatılıyor..." : order.status === "Toplanıyor" ? "Toplamaya Devam Et" : "Toplamayı Başlat"}
-      </button>
+      </Button>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { useState, type PropsWithChildren } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useOnlineStatus } from "../hooks/useOnlineStatus";
 import { hasWarehousePermission, useAuth } from "../features/auth/AuthContext";
+import { Button, ConfirmDialog } from "./ui";
 
 export function AppShell({ children }: PropsWithChildren) {
   const location = useLocation();
@@ -54,7 +55,7 @@ export function AppShell({ children }: PropsWithChildren) {
       <aside className={`wms-sidebar ${menuOpen ? "wms-sidebar-open" : ""}`}>
         <div className="flex items-center justify-between px-5 py-6">
           <Link to="/dashboard" className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl bg-acid text-forest"><Boxes size={22}/></span><span><b className="block">DSDST WMS</b><small className="text-white/50">Management System</small></span></Link>
-          <button className="lg:hidden" onClick={() => setMenuOpen(false)} aria-label="Menüyü kapat"><X/></button>
+          <Button variant="ghost" size="sm" className="lg:hidden" onClick={() => setMenuOpen(false)} aria-label="Menüyü kapat"><X/></Button>
         </div>
         <nav className="space-y-1 px-3">{visibleLinks.map((item, index) => "section" in item
           ? <p key={`${item.section}-${index}`} className="px-3 pb-1 pt-5 text-[10px] font-black tracking-[.18em] text-white/35">{item.section}</p>
@@ -64,20 +65,22 @@ export function AppShell({ children }: PropsWithChildren) {
       <div className="wms-content">
         <header className="mx-auto flex w-full max-w-[1600px] items-center justify-between px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))] lg:px-8">
           <div className="flex items-center gap-3">
-            {!isHome && <button className="icon-button" aria-label="Geri" onClick={() => navigate(-1)}><ArrowLeft size={22}/></button>}
-            <button className="icon-button lg:hidden" aria-label="Menü" onClick={() => setMenuOpen(true)}><Menu size={22}/></button>
+            {!isHome && <Button variant="secondary" size="sm" className="icon-button p-0" aria-label="Geri" onClick={() => navigate(-1)}><ArrowLeft size={22}/></Button>}
+            <Button variant="secondary" size="sm" className="icon-button p-0 lg:hidden" aria-label="Menü" onClick={() => setMenuOpen(true)}><Menu size={22}/></Button>
             <Link to="/" className="flex items-center gap-2.5"><span className="grid size-10 place-items-center rounded-xl bg-forest text-acid shadow-sm"><Boxes size={22} strokeWidth={2.4}/></span><span><span className="block text-[10px] font-black uppercase tracking-[0.22em] text-moss">DSDST</span><span className="block text-lg font-black leading-none tracking-tight">Warehouse</span></span></Link>
           </div>
           <div className="relative flex items-center gap-2">
             <span className="hidden rounded-full border border-line bg-white px-3 py-1.5 text-xs font-bold text-muted sm:block">{user?.username}</span>
-            <button
-              className="icon-button"
+            <Button
+              variant="secondary"
+              size="sm"
+              className="icon-button p-0"
               aria-label="Hesap menüsü"
               aria-expanded={accountMenuOpen}
               aria-haspopup="menu"
               title={`${user?.username} · Hesap menüsü`}
               onClick={() => setAccountMenuOpen((open) => !open)}
-            ><UserRound size={20}/></button>
+            ><UserRound size={20}/></Button>
             {accountMenuOpen && <>
               <button className="fixed inset-0 z-40 cursor-default" aria-label="Hesap menüsünü kapat" onClick={() => setAccountMenuOpen(false)}/>
               <div className="absolute right-0 top-14 z-50 w-64 overflow-hidden rounded-2xl border border-line bg-white p-2 shadow-[0_18px_50px_rgba(7,26,22,.18)]" role="menu">
@@ -86,11 +89,12 @@ export function AppShell({ children }: PropsWithChildren) {
                   <p className="mt-1 truncate text-sm font-black text-ink">{user?.username}</p>
                 </div>
                 <Link to="/admin" role="menuitem" className="mt-1 flex min-h-12 items-center gap-3 rounded-xl px-3 text-sm font-black hover:bg-canvas" onClick={() => setAccountMenuOpen(false)}><Settings2 size={19}/>Ayarlar</Link>
-                <button
+                <Button
+                  variant="ghost"
                   role="menuitem"
                   className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-black text-danger hover:bg-red-50"
                   onClick={() => { setAccountMenuOpen(false); setLogoutConfirmOpen(true); }}
-                ><LogOut size={19}/>Çıkış Yap</button>
+                ><LogOut size={19}/>Çıkış Yap</Button>
               </div>
             </>}
           </div>
@@ -104,17 +108,7 @@ export function AppShell({ children }: PropsWithChildren) {
           <NavLink to="/history"><Activity/><span>Geçmiş</span></NavLink>
         </nav>
       </div>
-      {logoutConfirmOpen && <div className="fixed inset-0 z-[70] grid place-items-center bg-forest/55 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !logoutBusy) setLogoutConfirmOpen(false); }}>
-        <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="logout-dialog-title" aria-describedby="logout-dialog-description">
-          <span className="grid size-12 place-items-center rounded-2xl bg-red-50 text-danger"><LogOut size={23}/></span>
-          <h2 id="logout-dialog-title" className="mt-5 text-2xl font-black">Çıkış yapmak istiyor musun?</h2>
-          <p id="logout-dialog-description" className="mt-2 text-sm leading-6 text-muted">Aktif oturumun kapatılacak ve giriş ekranına yönlendirileceksin.</p>
-          <div className="mt-6 grid grid-cols-2 gap-3">
-            <button className="secondary-button" disabled={logoutBusy} onClick={() => setLogoutConfirmOpen(false)}>Vazgeç</button>
-            <button className="primary-button !bg-danger" disabled={logoutBusy} onClick={() => void confirmLogout()}>{logoutBusy ? "Çıkılıyor…" : "Evet, çıkış yap"}</button>
-          </div>
-        </div>
-      </div>}
+      <ConfirmDialog open={logoutConfirmOpen} onClose={() => setLogoutConfirmOpen(false)} onConfirm={confirmLogout} title="Çıkış yapmak istiyor musun?" description="Aktif oturumun kapatılacak ve giriş ekranına yönlendirileceksin." confirmLabel="Evet, çıkış yap" destructive loading={logoutBusy}/>
     </div>
   );
 }

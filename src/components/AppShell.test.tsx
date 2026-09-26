@@ -4,10 +4,10 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
 
-const auth = vi.hoisted(() => ({ logout: vi.fn<() => Promise<void>>() }));
+const auth = vi.hoisted(() => ({ logout: vi.fn<() => Promise<void>>(), allowPermissions: true }));
 
 vi.mock("../features/auth/AuthContext", () => ({
-  hasWarehousePermission: () => true,
+  hasWarehousePermission: () => auth.allowPermissions,
   useAuth: () => ({
     user: { id: 1, username: "depo.operatoru", role: "admin", permissions: {} },
     logout: auth.logout,
@@ -18,6 +18,7 @@ vi.mock("../hooks/useOnlineStatus", () => ({ useOnlineStatus: () => true }));
 
 describe("AppShell hesap menüsü", () => {
   beforeEach(() => {
+    auth.allowPermissions = true;
     auth.logout.mockReset();
     auth.logout.mockResolvedValue();
   });
@@ -49,5 +50,13 @@ describe("AppShell hesap menüsü", () => {
     await user.click(screen.getByRole("button", { name: "Evet, çıkış yap" }));
 
     expect(auth.logout).toHaveBeenCalledTimes(1);
+  });
+
+  it("yetkisiz operasyon linklerini desktop ve mobil navigasyonda gizler", () => {
+    auth.allowPermissions = false;
+    render(<MemoryRouter><AppShell><p>İçerik</p></AppShell></MemoryRouter>);
+    expect(screen.queryByRole("link", { name: "Mal Kabul" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Sevkiyat" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Order Picking" })).toBeInTheDocument();
   });
 });

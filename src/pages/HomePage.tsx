@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { hasWarehousePermission, useAuth } from "../features/auth/AuthContext";
 import { getErrorMessage, warehouseAdminApi, warehouseApi } from "../lib/api";
 import type { ReceivingSession, WarehouseOrderSummary } from "../types/warehouse";
+import { Card } from "../components/ui";
 
 export function HomePage() {
   const { user } = useAuth();
@@ -65,17 +66,17 @@ export function HomePage() {
       {canUseAdmin && <Link to="/admin" className="flex min-h-20 items-center justify-between rounded-2xl border border-line bg-white p-4 shadow-sm transition active:scale-[0.99]"><span className="flex items-center gap-3"><span className="grid size-11 place-items-center rounded-xl bg-acid text-forest"><Settings2 size={22}/></span><span><span className="block font-black">Warehouse Admin</span><span className="mt-0.5 block text-xs font-semibold text-muted">Mal kabul, paket, lokasyon ve baskı</span></span></span><ArrowRight className="text-muted"/></Link>}
 
       <div className="grid grid-cols-2 gap-3">
-        <div className="metric-card">
+        <Card className="metric-card">
           <span className="text-xs font-bold text-muted">Bekleyen sipariş</span>
           <strong className="mt-2 text-3xl font-black">{state.total ?? "—"}</strong>
-        </div>
-        <div className="metric-card">
+        </Card>
+        <Card className="metric-card">
           <span className="text-xs font-bold text-muted">Panel API</span>
           <div className={`mt-3 flex items-center gap-2 font-black ${state.error ? "text-danger" : state.total === undefined ? "text-muted" : "text-success"}`}>
             {state.error ? <CircleX size={21} /> : <CircleCheck size={21} />}
             {state.error ? "Bağlantı yok" : state.total === undefined ? "Kontrol..." : "Bağlı"}
           </div>
-        </div>
+        </Card>
       </div>
       {state.error && <p className="rounded-xl bg-red-50 p-3 text-sm font-bold text-danger" role="alert">{state.error}</p>}
     </div>

@@ -1,13 +1,7 @@
-import { AlertTriangle, LoaderCircle, RefreshCw } from "lucide-react";
+import { AlertTriangle, RefreshCw } from "lucide-react";
+import { Button, LoadingState } from "./ui";
 
-export function LoadingState({ label = "Yükleniyor" }: { label?: string }) {
-  return (
-    <div className="state-card" role="status">
-      <LoaderCircle className="animate-spin text-moss" size={30} />
-      <p className="font-bold">{label}</p>
-    </div>
-  );
-}
+export { LoadingState };
 
 export function ErrorState({ message, retry }: { message: string; retry?: () => void }) {
   return (
@@ -18,9 +12,9 @@ export function ErrorState({ message, retry }: { message: string; retry?: () => 
         <p className="mt-1 text-sm text-muted">{message}</p>
       </div>
       {retry && (
-        <button className="secondary-button mt-2" onClick={retry}>
+        <Button variant="secondary" className="mt-2" onClick={retry}>
           <RefreshCw size={18} /> Tekrar dene
-        </button>
+        </Button>
       )}
     </div>
   );

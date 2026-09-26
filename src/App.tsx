@@ -18,12 +18,13 @@ import WarehouseLayoutPage from "./pages/WarehouseLayoutPage";
 import ReturnAcceptancePage from "./pages/ReturnAcceptancePage";
 import ShipmentPage from "./pages/ShipmentPage";
 import ReconciliationPage from "./pages/ReconciliationPage";
+import { LoadingState } from "./components/ui";
 
 const WarehouseMapPage = lazy(() => import("./pages/WarehouseMapPage"));
 
 function AuthenticatedApp() {
   const { user, loading } = useAuth();
-  if (loading) return <div className="grid min-h-dvh place-items-center bg-canvas font-black text-forest">Warehouse yükleniyor...</div>;
+  if (loading) return <LoadingState label="Warehouse yükleniyor..." className="min-h-dvh rounded-none border-0 bg-canvas"/>;
   if (!user) return <LoginPage />;
   return (
     <AppShell>
@@ -47,7 +48,7 @@ function AuthenticatedApp() {
         <Route path="/admin/count" element={<StockCountPage />} />
         <Route path="/admin/prints" element={<PrintJobsPage />} />
         <Route path="/admin/templates" element={<LabelTemplatesPage />} />
-        <Route path="/warehouse-map" element={<Suspense fallback={<div className="state-card mt-6 font-black">3D depo haritası yükleniyor…</div>}><WarehouseMapPage /></Suspense>} />
+        <Route path="/warehouse-map" element={<Suspense fallback={<LoadingState label="3D depo haritası yükleniyor…" className="mt-6"/>}><WarehouseMapPage /></Suspense>} />
         <Route path="/warehouse-layout" element={<WarehouseLayoutPage />} />
         <Route path="/packages" element={<PackagesPage />} />
         <Route path="/locations" element={<LocationsDesktopPage />} />

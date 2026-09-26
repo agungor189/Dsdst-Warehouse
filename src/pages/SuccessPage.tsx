@@ -1,6 +1,7 @@
 import { Check, ClipboardList, Home, PackageCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Button, Card } from "../components/ui";
 import { getErrorMessage, inventoryApi, shipmentApi, warehouseApi } from "../lib/api";
 import type { InventoryFulfillmentV1 } from "../types/warehouse";
 
@@ -71,7 +72,7 @@ export function SuccessPage() {
 
   return (
     <div className="grid min-h-[75dvh] place-items-center py-8 text-center">
-      <div className="w-full">
+      <Card className="w-full border-0 bg-transparent shadow-none" padding="none">
         <div className="mx-auto grid size-28 place-items-center rounded-full bg-success text-white shadow-xl shadow-success/20">
           <Check size={58} strokeWidth={3}/>
         </div>
@@ -92,9 +93,10 @@ export function SuccessPage() {
 
         <div className="mt-8 space-y-3">
           {canContinue && (
-            <button
-              className="primary-button w-full"
-              disabled={busy}
+            <Button
+              className="w-full"
+              loading={busy}
+              loadingText="Hazırlanıyor..."
               onClick={() => void goToPacking()}
             >
               <PackageCheck/>
@@ -103,7 +105,7 @@ export function SuccessPage() {
                 : reservation?.status === "PACKED"
                   ? "Sevkiyata Geç"
                   : "Paketlemeye Geç"}
-            </button>
+            </Button>
           )}
 
           {error && (
@@ -120,7 +122,7 @@ export function SuccessPage() {
             <Home/> Ana Sayfa
           </Link>
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

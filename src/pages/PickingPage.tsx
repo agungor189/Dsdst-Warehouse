@@ -6,6 +6,7 @@ import { PickProgress } from "../features/picking/PickProgress";
 import { ScanInput } from "../features/picking/ScanInput";
 import { getErrorMessage, warehouseApi } from "../lib/api";
 import type { PickPlan } from "../types/warehouse";
+import { Badge, Button, Card, Input } from "../components/ui";
 
 export function PickingPage() {
   const { id = "" } = useParams();
@@ -127,33 +128,33 @@ export function PickingPage() {
         Operasyon notu <span className="font-semibold text-muted">(isteğe bağlı)</span>
         <textarea id="pick-note" className="field mt-2 min-h-24 resize-y font-normal" maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Paketleme ekibi için not..." disabled={busy}/>
       </label>
-      <button className="primary-button mt-4 w-full" onClick={complete} disabled={!allComplete || busy}><CheckCircle2 size={22}/>{busy ? "Tamamlanıyor..." : "Siparişi Tamamla"}</button>
+      <Button className="mt-4 w-full" onClick={complete} loading={busy} disabled={!allComplete}><CheckCircle2 size={22}/>Siparişi Tamamla</Button>
     </div>
   );
 
   return (
     <div className="space-y-4 pt-4">
       <section className="rounded-[1.75rem] bg-forest p-5 text-white">
-        <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold text-acid">{plan.order.order_code}</p><h1 className="mt-1 text-xl font-black">Toplama adımı {currentIndex + 1}</h1></div><span className="rounded-full bg-white/10 px-3 py-1 text-sm font-black">{currentIndex + 1}/{plan.items.length}</span></div>
+        <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold text-acid">{plan.order.order_code}</p><h1 className="mt-1 text-xl font-black">Toplama adımı {currentIndex + 1}</h1></div><Badge className="border-white/10 bg-white/10 text-white">{currentIndex + 1}/{plan.items.length}</Badge></div>
         <div className="mt-5"><PickProgress current={completedCount} total={plan.items.length}/></div>
       </section>
 
-      <section className="rounded-[1.75rem] border border-line bg-white p-5 shadow-sm">
+      <Card as="section" padding="lg" className="rounded-[1.75rem]">
         {currentItem.image_url ? <img className="mb-5 aspect-square w-full rounded-2xl bg-canvas object-contain" src={currentItem.image_url} alt={currentItem.name || currentItem.sku}/> : <div className="mb-5 grid aspect-[2/1] place-items-center rounded-2xl bg-canvas text-muted"><span className="flex items-center gap-2 font-bold"><ImageOff/> Ürün görseli yok</span></div>}
         <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.16em] text-moss"><MapPin size={17}/> Lokasyon</div>
         <div className="mt-3 break-words text-5xl font-black leading-none tracking-[-0.05em] text-forest">{primaryAllocation?.location_code || currentItem.warehouse_location || "LOKASYON YOK"}</div>
         {currentItem.package_tracking && <div className="mt-4 space-y-2 rounded-2xl bg-acid/35 p-4"><p className="text-xs font-black uppercase tracking-widest text-forest">Paket sırası</p>{currentItem.package_allocations?.map((allocation) => <div key={allocation.package_id} className="flex items-center justify-between gap-3"><span className="font-black">{allocation.package_code}</span><span className="shrink-0 text-sm font-bold">{allocation.pick_quantity} adet</span></div>)}</div>}
         <div className="mt-5 border-t border-line pt-4"><p className="text-xs font-black uppercase tracking-widest text-muted">SKU</p><p className="mt-1 text-2xl font-black">{currentItem.sku}</p><p className="mt-2 text-base font-semibold text-muted">{currentItem.name || "Ürün adı yok"}</p></div>
         <div className="mt-5 grid grid-cols-2 gap-3"><div className="rounded-xl bg-canvas p-3"><p className="text-xs font-bold text-muted">Gerekli</p><p className="mt-1 text-2xl font-black">{currentItem.required_quantity} <span className="text-sm">adet</span></p></div><div className="rounded-xl bg-canvas p-3"><p className="text-xs font-bold text-muted">Mevcut stok</p><p className={`mt-1 text-2xl font-black ${(currentItem.available_stock ?? currentItem.central_stock) < currentItem.required_quantity ? "text-danger" : ""}`}>{currentItem.available_stock ?? currentItem.central_stock}</p></div></div>
-      </section>
+      </Card>
 
       {!isVerified && <ScanInput onScan={scan} busy={busy} label={currentItem.package_tracking ? "Önerilen paket / lokasyon kodunu okutun" : undefined} placeholder={primaryAllocation?.package_code || undefined} cameraTitle={currentItem.package_tracking ? "Paket veya lokasyonu okutun" : undefined}/>}
       {isVerified && (
         <form onSubmit={confirmQuantity} className="rounded-2xl border-2 border-success/30 bg-emerald-50 p-4">
           <div className="mb-4 flex items-center gap-2 font-black text-success"><Check size={22}/> Ürün / lokasyon doğrulandı</div>
           <label htmlFor="pick-quantity" className="text-sm font-black">Toplanan adet · tam olarak {currentItem.required_quantity}</label>
-          <input id="pick-quantity" className="field mt-2 min-h-20 text-center text-4xl font-black" type="number" inputMode="decimal" step="any" value={quantity} onChange={(event) => setQuantity(event.target.value)} autoFocus disabled={busy}/>
-          <button className="primary-button mt-3 w-full" type="submit" disabled={busy}><PackageCheck size={22}/>{busy ? "Kaydediliyor..." : "Adedi Onayla"}</button>
+          <Input id="pick-quantity" containerClassName="mt-2" className="min-h-20 text-center text-4xl font-black" type="number" inputMode="decimal" step="any" value={quantity} onChange={(event) => setQuantity(event.target.value)} autoFocus disabled={busy}/>
+          <Button className="mt-3 w-full" type="submit" loading={busy} loadingText="Kaydediliyor..."><PackageCheck size={22}/>Adedi Onayla</Button>
         </form>
       )}
       {feedback && <Feedback {...feedback} />}
