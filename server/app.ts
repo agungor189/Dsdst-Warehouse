@@ -472,6 +472,21 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
       message: "Stok çıkışı yalnız doğrulanmış fiziksel taşıyıcı teslimiyle yapılabilir." } }));
   app.get("/api/shipping/v1/provider-contracts/geliver", requireSession, (req, res) =>
     forward(req, res, "GET", "/shipping/provider-contracts/geliver"));
+  app.get("/api/shipping/v1/shipments", requireSession, (req, res) => {
+    const rawScope = safeQueryText(req.query.scope, 20).toLowerCase();
+    const scope = ["pending", "completed", "all"].includes(rawScope) ? rawScope : "pending";
+
+    const query = new URLSearchParams({
+      scope,
+      limit: String(safePositiveInteger(req.query.limit, 200, 500)),
+    });
+
+    const search = safeQueryText(req.query.q, 120);
+    if (search) query.set("q", search);
+
+    return forward(req, res, "GET", "/shipping/shipments", query);
+  });
+
   app.get("/api/shipping/v1/shipments/:id", requireSession, (req, res) =>
     forward(req, res, "GET", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}`));
   app.get("/api/shipping/v1/reservations/:id/shipment", requireSession, (req, res) =>

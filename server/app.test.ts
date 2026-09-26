@@ -101,6 +101,40 @@ describe("Warehouse BFF", () => {
     expect(called).toBe(false);
   });
 
+  it("shipment queue listesini güvenli query alanlarıyla Panel gatewayine iletir", async () => {
+    let received: { path?: string; scope?: string; limit?: string; q?: string } = {};
+
+    const panelUrl = await startPanel((req, res) => {
+      received = {
+        path: req.path,
+        scope: String(req.query.scope || ""),
+        limit: String(req.query.limit || ""),
+        q: String(req.query.q || ""),
+      };
+
+      res.json({
+        success: true,
+        contract: "dsdst.shipment-list.v1",
+        data: [{ id: "shipment:res-1", orderNumber: "SHO-1001", state: "PREPARING" }],
+      });
+    });
+
+    const response = await request(
+      createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }),
+    )
+      .get("/api/shipping/v1/shipments?scope=pending&limit=200&q=SHO-1001")
+      .set("Cookie", sessionCookie);
+
+    expect(response.status).toBe(200);
+    expect(response.body.contract).toBe("dsdst.shipment-list.v1");
+    expect(received).toEqual({
+      path: "/api/warehouse/v1/shipping/shipments",
+      scope: "pending",
+      limit: "200",
+      q: "SHO-1001",
+    });
+  });
+
   it("V2-13 handoff identity/evidence/actual charge are whitelisted to the Panel-owned gateway", async () => {
     let received: { path?: string; body?: unknown } = {};
     const panelUrl = await startPanel((req, res) => {
