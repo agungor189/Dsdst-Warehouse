@@ -34,7 +34,6 @@ export function ScanInput({
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrError, setOcrError] = useState("");
   const [ocrOptions, setOcrOptions] = useState<string[]>([]);
-  const inputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsRef = useRef<IScannerControls | null>(null);
   const ocrVideoRef = useRef<HTMLVideoElement>(null);
@@ -46,7 +45,6 @@ export function ScanInput({
   const ocrOpenRef = useRef(false);
   const handledRef = useRef(false);
   const onScanRef = useRef(onScan);
-  useEffect(() => inputRef.current?.focus(), []);
   useEffect(() => { onScanRef.current = onScan; }, [onScan]);
   useEffect(() => { ocrOpenRef.current = ocrOpen; }, [ocrOpen]);
   useEffect(() => {
@@ -92,7 +90,6 @@ export function ScanInput({
           navigator.vibrate?.(80);
           void onScanRef.current(scannedCode).then((success) => {
             if (success) setCode("");
-            window.setTimeout(() => inputRef.current?.focus(), 0);
           });
         });
         if (!active) {
@@ -180,7 +177,6 @@ export function ScanInput({
     setCode(value); setOcrOpen(false); navigator.vibrate?.(80);
     const success = await onScanRef.current(value);
     if (success) setCode("");
-    window.setTimeout(() => inputRef.current?.focus(), 0);
   };
 
   const captureOcr = async () => {
@@ -231,7 +227,6 @@ export function ScanInput({
     if (!value || busy) return;
     const success = await onScan(value);
     if (success) setCode("");
-    window.setTimeout(() => inputRef.current?.focus(), 0);
   };
 
   return (
@@ -242,7 +237,7 @@ export function ScanInput({
           {variant === "picking"
             ? <button type="button" className="picking-scan-camera" aria-label="Kamerayı aç" disabled={busy} onClick={() => setCameraOpen(true)}><ScanBarcode size={20}/></button>
             : <ScanBarcode className="absolute left-4 top-1/2 -translate-y-1/2 text-moss" size={25}/>}
-          <input ref={inputRef} id="scan-code" className={variant === "picking" ? "picking-scan-input" : "field min-h-16 pl-14 text-lg font-black uppercase"} value={code} onChange={(event) => setCode(event.target.value)} autoComplete="off" autoCapitalize="characters" placeholder={placeholder} disabled={busy}/>
+          <input id="scan-code" className={variant === "picking" ? "picking-scan-input" : "field min-h-16 pl-14 text-lg font-black uppercase"} value={code} onChange={(event) => setCode(event.target.value)} autoComplete="off" autoCapitalize="characters" placeholder={placeholder} disabled={busy}/>
         </div>
         {variant === "picking" && <button className="primary-button picking-scan-submit" disabled={!code.trim() || busy} type="submit">{busy ? "Kontrol…" : "Doğrula"}</button>}
       </div>

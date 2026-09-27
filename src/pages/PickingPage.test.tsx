@@ -57,7 +57,9 @@ describe("PickingPage", () => {
     renderPage();
     await user.type(await screen.findByLabelText("Lokasyon / Barkod / SKU okutun"), "8690001{enter}");
 
-    expect(await screen.findByLabelText(/Toplanan adet/)).toHaveValue(2);
+    const quantity = await screen.findByLabelText(/Toplanan adet/);
+    expect(quantity).toHaveValue(2);
+    expect(quantity).not.toHaveFocus();
     expect(screen.queryByRole("button", { name: "Kamera ile Tara" })).not.toBeInTheDocument();
   });
 

@@ -48,7 +48,7 @@ export function LoginPage() {
         <form className="login-form" onSubmit={submit}>
           <div>
             <label htmlFor="username">Kullanıcı adı veya e-posta</label>
-            <input id="username" className="field" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required autoFocus/>
+            <input id="username" className="field" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required/>
           </div>
           <div>
             <label htmlFor="password">Şifre</label>

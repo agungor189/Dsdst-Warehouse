@@ -56,6 +56,11 @@ describe("ScanInput kamera taraması", () => {
     });
   });
 
+  it("sayfa açılışında scan inputuna otomatik focus vermez", () => {
+    render(<ScanInput onScan={vi.fn().mockResolvedValue(true)} busy={false}/>);
+    expect(screen.getByLabelText("Lokasyon / Barkod / SKU okutun")).not.toHaveFocus();
+  });
+
   it("kameradan okunan lokasyon veya SKU değerini mevcut doğrulamaya gönderir", async () => {
     const onScan = vi.fn().mockResolvedValue(true);
     const user = userEvent.setup();
