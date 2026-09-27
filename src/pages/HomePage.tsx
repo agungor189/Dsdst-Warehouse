@@ -1,83 +1,156 @@
-import { ArrowRight, CircleCheck, CircleX, History, PackageCheck, Play, Settings2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import {
+  Check, ChevronRight, PackageCheck, RotateCcw, Send, Truck, X,
+} from "lucide-react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 import { Link } from "react-router-dom";
 import { hasWarehousePermission, useAuth } from "../features/auth/AuthContext";
-import { getErrorMessage, warehouseAdminApi, warehouseApi } from "../lib/api";
-import type { ReceivingSession, WarehouseOrderSummary } from "../types/warehouse";
+import { getErrorMessage, warehouseApi } from "../lib/api";
+import type { WarehouseOrderSummary, WarehousePermission } from "../types/warehouse";
+
+type QueueState = {
+  orders: WarehouseOrderSummary[];
+  total?: number;
+  error?: string;
+};
+
+type QuickAction = {
+  label: string;
+  description: string;
+  to: string;
+  icon: ComponentType<{ size?: number; strokeWidth?: number }>;
+  tone: string;
+  permission: WarehousePermission;
+};
+
+const quickActions: QuickAction[] = [
+  { label: "Toplama", description: "Sipariş topla", to: "/orders", icon: Check, tone: "cobalt", permission: "warehouse:pick_orders" },
+  { label: "Paketleme", description: "Paket hazırla", to: "/shipments", icon: PackageCheck, tone: "teal", permission: "shipping:manage" },
+  { label: "Sevkiyat", description: "Sevke hazırla", to: "/shipments", icon: Send, tone: "purple", permission: "shipping:manage" },
+  { label: "İade", description: "Ürün kabul", to: "/returns", icon: RotateCcw, tone: "danger", permission: "warehouse:accept_returns" },
+  { label: "Yükleme Alanı", description: "Handoff / yükleme", to: "/shipments", icon: Truck, tone: "warning", permission: "shipping:dispatch" },
+];
+
+const operationMetrics = ["Paketlenecek", "Sevke hazır", "İade", "Yükleme"];
+
+function greetingFor(date = new Date()) {
+  const hour = date.getHours();
+  if (hour < 12) return "Günaydın";
+  if (hour < 18) return "İyi günler";
+  return "İyi akşamlar";
+}
+
+function PickingSheet({ orders, total, onClose }: { orders: WarehouseOrderSummary[]; total: number; onClose: () => void }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    closeRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="sheet-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section className="picking-sheet" role="dialog" aria-modal="true" aria-labelledby="picking-sheet-title">
+        <span className="sheet-handle" aria-hidden="true" />
+        <div className="sheet-heading">
+          <div>
+            <h2 id="picking-sheet-title">Toplanacak Siparişler</h2>
+            <p>{total} sipariş</p>
+          </div>
+          <button ref={closeRef} className="sheet-close" type="button" aria-label="Kapat" onClick={onClose}><X size={18}/></button>
+        </div>
+        <div className="sheet-order-list">
+          {orders.slice(0, 5).map((order) => (
+            <Link key={order.id} to={`/orders/${order.id}`} className="sheet-order" onClick={onClose}>
+              <span className="sheet-order-copy">
+                <small>{order.order_code}</small>
+                <strong>{order.customer || "Müşteri bilgisi yok"}</strong>
+                <span>{order.item_count == null ? "Ürün bilgisi bekleniyor" : `${order.item_count} ürün toplanacak`}</span>
+              </span>
+              <span className="sheet-order-meta">
+                {order.has_kit && <span className="order-badge order-badge-kit">KIT</span>}
+                {order.has_assembly && <span className="order-badge order-badge-assembly">ASSEMBLY</span>}
+                <ChevronRight size={18}/>
+              </span>
+            </Link>
+          ))}
+          {!orders.length && <p className="sheet-empty">Toplanacak sipariş bulunmuyor.</p>}
+        </div>
+        <Link to="/orders" className="sheet-all-link" onClick={onClose}>Tüm toplama kuyruğunu aç</Link>
+      </section>
+    </div>
+  );
+}
 
 export function HomePage() {
   const { user } = useAuth();
-  const [state, setState] = useState<{ total?: number; activeOrder?: WarehouseOrderSummary; error?: string }>({});
-  const [activeReceiving, setActiveReceiving] = useState<ReceivingSession | null>(null);
-  const canUseAdmin = ["warehouse:receive", "warehouse:print_labels", "warehouse:place_packages", "warehouse:move_stock", "warehouse:manage_locations", "warehouse:count_stock"]
-    .some((permission) => hasWarehousePermission(user, permission as Parameters<typeof hasWarehousePermission>[1]));
+  const [queue, setQueue] = useState<QueueState>({ orders: [] });
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   useEffect(() => {
+    let active = true;
     warehouseApi.listOrders(1, 100)
-      .then(({ orders, pagination }) => setState({
-        total: pagination.total,
-        activeOrder: orders.find((order) => order.status === "Toplanıyor" && order.picker?.user_id === user?.id),
-      }))
-      .catch((error) => setState({ error: getErrorMessage(error) }));
-  }, [user?.id]);
-  useEffect(() => {
-    if (!hasWarehousePermission(user, "warehouse:receive")) return;
-    const load = () => warehouseAdminApi.listReceivingSessions()
-      .then((sessions) => setActiveReceiving(sessions.find((session) => ["active", "paused"].includes(session.receiving_state)) || null))
-      .catch(() => setActiveReceiving(null));
-    void load();
-    const timer = window.setInterval(load, 5_000);
-    return () => window.clearInterval(timer);
-  }, [user]);
+      .then(({ orders, pagination }) => {
+        if (active) setQueue({ orders, total: pagination.total });
+      })
+      .catch((error) => {
+        if (active) setQueue({ orders: [], error: getErrorMessage(error) });
+      });
+    return () => { active = false; };
+  }, []);
+
+  const displayName = user?.username?.trim() || "Operatör";
+  const visibleActions = quickActions.filter((action) => hasWarehousePermission(user, action.permission));
 
   return (
-    <div className="space-y-5 pt-4">
-      <section className="overflow-hidden rounded-[2rem] bg-forest p-6 text-white shadow-xl shadow-forest/10">
-        <p className="text-xs font-black uppercase tracking-[0.2em] text-acid">Hızlı işlem</p>
-        <h1 className="mt-3 max-w-sm text-4xl font-black leading-[0.98] tracking-[-0.04em]">Sıradaki siparişi hazırlayın.</h1>
-        <p className="mt-4 max-w-md text-sm leading-6 text-white/65">Lokasyona gidin, ürünü okutun ve adedi onaylayın.</p>
-        <Link to="/orders" className="mt-7 flex min-h-16 items-center justify-between rounded-2xl bg-acid px-5 text-lg font-black text-forest transition active:scale-[0.98]">
-          <span className="flex items-center gap-3"><PackageCheck size={25} /> Sipariş Topla</span>
-          <ArrowRight />
-        </Link>
+    <div className="mobile-home">
+      <section className="home-welcome">
+        <h1>{greetingFor()}, {displayName}</h1>
+        <p>{queue.total == null ? "Depo işleri yükleniyor." : `Depoda ${queue.total} işlem bekliyor.`}</p>
       </section>
 
-      {state.activeOrder && (
-        <Link to={`/orders/${state.activeOrder.id}/pick`} className="flex min-h-20 items-center justify-between rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 transition active:scale-[0.99]">
-          <span className="flex items-center gap-3">
-            <span className="grid size-11 place-items-center rounded-xl bg-amber-400 text-amber-950"><Play size={21} fill="currentColor" /></span>
-            <span><span className="block text-xs font-bold text-amber-800">Aktif toplama</span><span className="block font-black">{state.activeOrder.order_code}</span></span>
+      <button className="picking-summary" type="button" aria-label="Toplama kuyruğunu aç" onClick={() => setSheetOpen(true)} disabled={queue.total == null}>
+        <span className="picking-summary-copy">
+          <span className="home-kicker">Toplanacak Siparişler</span>
+          <span className="picking-total-row">
+            <strong data-testid="picking-order-count">{queue.total ?? "—"}</strong>
           </span>
-          <span className="font-black text-amber-900">Devam et</span>
-        </Link>
-      )}
-
-      {activeReceiving && <Link to="/admin/inbound" className="flex min-h-20 items-center justify-between rounded-2xl border-2 border-lime-300 bg-lime-50 p-4 transition active:scale-[0.99]"><span className="flex items-center gap-3"><span className="grid size-11 place-items-center rounded-xl bg-acid text-forest"><PackageCheck size={22}/></span><span><span className="block text-xs font-bold text-moss">Aktif Mal Kabul</span><span className="block font-black">{activeReceiving.lot_number}</span></span></span><span className="font-black text-forest">{activeReceiving.placed_count || 0}/{activeReceiving.expected_package_count} paket</span></Link>}
-
-      <Link to="/history" className="flex min-h-20 items-center justify-between rounded-2xl border border-line bg-white p-4 shadow-sm transition active:scale-[0.99]">
-        <span className="flex items-center gap-3">
-          <span className="grid size-11 place-items-center rounded-xl bg-emerald-100 text-moss"><History size={22}/></span>
-          <span><span className="block font-black">Toplama Geçmişi</span><span className="mt-0.5 block text-xs font-semibold text-muted">Tamamlanan toplama ve BOM kayıtları</span></span>
+          <span className="picking-summary-link">Toplama kuyruğunu aç</span>
         </span>
-        <ArrowRight className="text-muted"/>
-      </Link>
+        <span className="picking-summary-arrow"><ChevronRight size={20}/></span>
+      </button>
 
-      {canUseAdmin && <Link to="/admin" className="flex min-h-20 items-center justify-between rounded-2xl border border-line bg-white p-4 shadow-sm transition active:scale-[0.99]"><span className="flex items-center gap-3"><span className="grid size-11 place-items-center rounded-xl bg-acid text-forest"><Settings2 size={22}/></span><span><span className="block font-black">Warehouse Admin</span><span className="mt-0.5 block text-xs font-semibold text-muted">Mal kabul, paket, lokasyon ve baskı</span></span></span><ArrowRight className="text-muted"/></Link>}
+      {queue.error && <p className="home-error" role="alert">{queue.error}</p>}
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="metric-card">
-          <span className="text-xs font-bold text-muted">Bekleyen sipariş</span>
-          <strong className="mt-2 text-3xl font-black">{state.total ?? "—"}</strong>
+      <section className="home-section" aria-labelledby="operation-status-title">
+        <h2 id="operation-status-title">Operasyon durumu</h2>
+        <div className="operation-grid">
+          {operationMetrics.map((label) => (
+            <article className="operation-card operation-card-unavailable" key={label} aria-label={`${label}: veri henüz mevcut değil`}>
+              <span>{label}</span><strong>—</strong><small>Veri bekleniyor</small>
+            </article>
+          ))}
         </div>
-        <div className="metric-card">
-          <span className="text-xs font-bold text-muted">Panel API</span>
-          <div className={`mt-3 flex items-center gap-2 font-black ${state.error ? "text-danger" : state.total === undefined ? "text-muted" : "text-success"}`}>
-            {state.error ? <CircleX size={21} /> : <CircleCheck size={21} />}
-            {state.error ? "Bağlantı yok" : state.total === undefined ? "Kontrol..." : "Bağlı"}
-          </div>
+      </section>
+
+      <section className="home-section" aria-labelledby="quick-actions-title">
+        <h2 id="quick-actions-title">Hızlı işlemler</h2>
+        <div className="quick-action-grid">
+          {visibleActions.map((action) => (
+            <Link key={action.label} className="quick-action" to={action.to}>
+              <span className={`quick-action-icon quick-action-${action.tone}`}><action.icon size={18} strokeWidth={2}/></span>
+              <ChevronRight className="quick-action-chevron" size={17}/>
+              <strong>{action.label}</strong>
+              <small>{action.description}</small>
+            </Link>
+          ))}
         </div>
-      </div>
-      {state.error && <p className="rounded-xl bg-red-50 p-3 text-sm font-bold text-danger" role="alert">{state.error}</p>}
+      </section>
+
+      {sheetOpen && <PickingSheet orders={queue.orders} total={queue.total || 0} onClose={() => setSheetOpen(false)} />}
     </div>
   );
 }

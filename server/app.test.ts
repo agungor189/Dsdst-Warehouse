@@ -41,7 +41,7 @@ describe("Warehouse BFF", () => {
       received.authorization = req.header("authorization");
       received.path = req.path;
       received.query = req.query;
-      res.json({ success: true, data: [{ id: "order-1" }], pagination: { total: 1 } });
+      res.json({ success: true, data: [{ id: "order-1", item_count: 2, has_kit: true, has_assembly: false }], pagination: { total: 1 } });
     });
     const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET });
 
@@ -54,6 +54,7 @@ describe("Warehouse BFF", () => {
       path: "/api/warehouse/v1/orders",
       query: { page: "2", limit: "100" },
     });
+    expect(response.body.data[0]).toEqual({ id: "order-1", item_count: 2, has_kit: true, has_assembly: false });
   });
 
   it("versioned catalog contract'ını salt-okunur olarak Panel'e iletir", async () => {

@@ -1,42 +1,93 @@
-import { Activity, AlertTriangle, ArrowLeft, Boxes, ClipboardList, Layers3, LayoutDashboard, LogOut, Map, MapPin, Menu, Move, PackageCheck, RotateCcw, Settings2, Truck, UserRound, WifiOff, X } from "lucide-react";
-import { useState, type PropsWithChildren } from "react";
-import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
-import { useOnlineStatus } from "../hooks/useOnlineStatus";
+import {
+  Activity, AlertTriangle, ArrowDownUp, Boxes, Check, ClipboardList, Hash, Home, Layers3, LayoutDashboard,
+  LogOut, Map, MapPin, Menu, MoreHorizontal, Move, PackageCheck, Printer, RotateCcw,
+  ScanLine, Send, Settings2, Truck, UserRound, X,
+} from "lucide-react";
+import { useEffect, useRef, useState, type ComponentType, type PropsWithChildren } from "react";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import { hasWarehousePermission, useAuth } from "../features/auth/AuthContext";
+import { useApiStatus } from "../lib/apiStatus";
+import type { WarehousePermission } from "../types/warehouse";
+
+type NavItem = {
+  label: string;
+  description?: string;
+  to: string;
+  icon: ComponentType<{ size?: number }>;
+  tone?: string;
+  permission?: WarehousePermission;
+};
+
+const desktopLinks: Array<NavItem | { section: string }> = [
+  { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard, permission: "warehouse:view_map" },
+  { section: "OPERASYON" },
+  { label: "Order Picking", to: "/picking-management", icon: ClipboardList, permission: "warehouse:pick_orders" },
+  { label: "Mal Kabul", to: "/admin/inbound", icon: PackageCheck, permission: "warehouse:receive" },
+  { label: "İade Kabul", to: "/returns", icon: RotateCcw, permission: "warehouse:accept_returns" },
+  { label: "Sevkiyat", to: "/shipments", icon: Truck, permission: "shipping:manage" },
+  { label: "Ürün Taşıma", to: "/admin/move", icon: Move, permission: "warehouse:move_stock" },
+  { section: "DEPO" },
+  { label: "Depo Yerleşimi", to: "/warehouse-layout", icon: Layers3, permission: "warehouse:view_map" },
+  { label: "Depo Haritası", to: "/warehouse-map", icon: Map, permission: "warehouse:view_map" },
+  { label: "Paketler", to: "/packages", icon: Boxes, permission: "warehouse:view_analytics" },
+  { label: "Lokasyonlar", to: "/locations", icon: MapPin, permission: "warehouse:view_map" },
+  { label: "Ürünler", to: "/stock", icon: Boxes, permission: "warehouse:view_analytics" },
+  { section: "ANALİZ" },
+  { label: "Hareketler", to: "/movements", icon: Activity, permission: "warehouse:view_analytics" },
+  { label: "Kullanıcı Aktiviteleri", to: "/user-activity", icon: Activity, permission: "warehouse:view_analytics" },
+  { label: "Kapasite", to: "/capacity", icon: LayoutDashboard, permission: "warehouse:view_analytics" },
+  { label: "Sistem Kontrolü", to: "/reconciliation", icon: AlertTriangle, permission: "warehouse:view_analytics" },
+  { section: "YÖNETİM" },
+  { label: "Ayarlar", to: "/admin", icon: Settings2 },
+];
+
+const drawerGroups: Array<{ title: string; items: NavItem[] }> = [
+  { title: "OPERASYON", items: [
+    { label: "Toplama", description: "Picking kuyruğu", to: "/orders", icon: Check, tone: "cobalt", permission: "warehouse:pick_orders" },
+    { label: "Paketleme", description: "Paket hazırlama", to: "/shipments", icon: PackageCheck, tone: "teal", permission: "shipping:manage" },
+    { label: "Sevkiyat", description: "Kargo ve handoff", to: "/shipments", icon: Send, tone: "purple", permission: "shipping:manage" },
+    { label: "İade", description: "İade ve kalite", to: "/returns", icon: RotateCcw, tone: "danger", permission: "warehouse:accept_returns" },
+    { label: "Yükleme Alanı", description: "Yükleme / handoff", to: "/shipments", icon: Truck, tone: "warning", permission: "shipping:dispatch" },
+  ] },
+  { title: "DEPO", items: [
+    { label: "Ürün Taşıma", description: "Paket lokasyonu", to: "/admin/move", icon: ArrowDownUp, permission: "warehouse:move_stock" },
+    { label: "Stok", description: "Canlı stok görünümü", to: "/stock", icon: Boxes, permission: "warehouse:view_analytics" },
+    { label: "Stok Sayımı", description: "Fiziksel sayım", to: "/admin/count", icon: Hash, permission: "warehouse:count_stock" },
+    { label: "Lokasyonlar", description: "Kapasite ve doluluk", to: "/admin/locations", icon: MapPin, permission: "warehouse:manage_locations" },
+    { label: "Replenishment", description: "Pick-face ikmali", to: "/admin/replenishments", icon: Move, permission: "warehouse:move_stock" },
+  ] },
+  { title: "DİĞER / YÖNETİM", items: [
+    { label: "Mal Kabul", description: "Sevki kabulü", to: "/admin/inbound", icon: PackageCheck, permission: "warehouse:receive" },
+    { label: "Baskı İşleri", description: "Etiket kuyruğu", to: "/admin/prints", icon: Printer, permission: "warehouse:print_labels" },
+    { label: "Ayarlar", description: "Warehouse yönetimi", to: "/admin", icon: Settings2 },
+  ] },
+];
+
+function Brand({ dark = false }: { dark?: boolean }) {
+  return <span className={`app-brand ${dark ? "app-brand-dark" : ""}`}><span className="brand-mark">DS</span><span><small>DSDST</small><strong>Warehouse</strong></span></span>;
+}
 
 export function AppShell({ children }: PropsWithChildren) {
   const location = useLocation();
-  const navigate = useNavigate();
-  const online = useOnlineStatus();
   const { user, logout } = useAuth();
+  const apiStatus = useApiStatus();
   const [menuOpen, setMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
-  const isHome = location.pathname === "/";
-  const desktopLinks = [
-    { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard, permission: "warehouse:view_map" as const },
-    { section: "OPERASYON" },
-    { label: "Order Picking", to: "/picking-management", icon: ClipboardList },
-    { label: "Mal Kabul", to: "/admin/inbound", icon: PackageCheck, permission: "warehouse:receive" as const },
-    { label: "İade Kabul", to: "/returns", icon: RotateCcw, permission: "warehouse:accept_returns" as const },
-    { label: "Sevkiyat", to: "/shipments", icon: Truck, permission: "shipping:manage" as const },
-    { label: "Ürün Taşıma", to: "/admin/move", icon: Move, permission: "warehouse:move_stock" as const },
-    { section: "DEPO" },
-    { label: "Depo Yerleşimi", to: "/warehouse-layout", icon: Layers3, permission: "warehouse:view_map" as const },
-    { label: "Depo Haritası", to: "/warehouse-map", icon: Map, permission: "warehouse:view_map" as const },
-    { label: "Paketler", to: "/packages", icon: Boxes, permission: "warehouse:view_analytics" as const },
-    { label: "Lokasyonlar", to: "/locations", icon: MapPin, permission: "warehouse:view_map" as const },
-    { label: "Ürünler", to: "/stock", icon: Boxes, permission: "warehouse:view_analytics" as const },
-    { section: "ANALİZ" },
-    { label: "Hareketler", to: "/movements", icon: Activity, permission: "warehouse:view_analytics" as const },
-    { label: "Kullanıcı Aktiviteleri", to: "/user-activity", icon: Activity, permission: "warehouse:view_analytics" as const },
-    { label: "Kapasite", to: "/capacity", icon: LayoutDashboard, permission: "warehouse:view_analytics" as const },
-    { label: "Sistem Kontrolü", to: "/reconciliation", icon: AlertTriangle, permission: "warehouse:view_analytics" as const },
-    { section: "YÖNETİM" },
-    { label: "Ayarlar", to: "/admin", icon: Settings2 },
-  ];
-  const visibleLinks = desktopLinks.filter((item) => !("permission" in item) || !item.permission || hasWarehousePermission(user, item.permission));
+  const drawerCloseRef = useRef<HTMLButtonElement>(null);
+
+  const canSee = (item: NavItem) => !item.permission || hasWarehousePermission(user, item.permission);
+  const visibleDesktopLinks = desktopLinks.filter((item) => "section" in item || canSee(item));
+
+  useEffect(() => setMenuOpen(false), [location.pathname]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    drawerCloseRef.current?.focus();
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape") setMenuOpen(false); };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [menuOpen]);
 
   async function confirmLogout() {
     setLogoutBusy(true);
@@ -48,71 +99,82 @@ export function AppShell({ children }: PropsWithChildren) {
     }
   }
 
+  const requestLogout = () => {
+    setMenuOpen(false);
+    setAccountMenuOpen(false);
+    setLogoutConfirmOpen(true);
+  };
+
   return (
-    <div className="min-h-dvh bg-canvas text-ink">
-      {!online && <div className="sticky top-0 z-[60] flex items-center justify-center gap-2 bg-danger px-4 py-3 text-sm font-black text-white"><WifiOff size={18}/> Panel bağlantısı yok</div>}
-      <aside className={`wms-sidebar ${menuOpen ? "wms-sidebar-open" : ""}`}>
-        <div className="flex items-center justify-between px-5 py-6">
-          <Link to="/dashboard" className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl bg-acid text-forest"><Boxes size={22}/></span><span><b className="block">DSDST WMS</b><small className="text-white/50">Management System</small></span></Link>
-          <button className="lg:hidden" onClick={() => setMenuOpen(false)} aria-label="Menüyü kapat"><X/></button>
-        </div>
-        <nav className="space-y-1 px-3">{visibleLinks.map((item, index) => "section" in item
-          ? <p key={`${item.section}-${index}`} className="px-3 pb-1 pt-5 text-[10px] font-black tracking-[.18em] text-white/35">{item.section}</p>
-          : <NavLink key={item.to} to={item.to!} onClick={() => setMenuOpen(false)} className={({ isActive }) => `sidebar-link ${isActive ? "sidebar-link-active" : ""}`}><item.icon size={18}/>{item.label}</NavLink>)}</nav>
+    <div className="app-shell">
+      <aside className="wms-sidebar" aria-label="Masaüstü navigasyon">
+        <Link to="/dashboard" className="desktop-brand"><Brand dark /></Link>
+        <nav className="desktop-nav">{visibleDesktopLinks.map((item, index) => "section" in item
+          ? <p key={`${item.section}-${index}`}>{item.section}</p>
+          : <NavLink key={`${item.label}-${item.to}`} to={item.to} className={({ isActive }) => `sidebar-link ${isActive ? "sidebar-link-active" : ""}`}><item.icon size={18}/>{item.label}</NavLink>)}</nav>
       </aside>
-      {menuOpen && <button className="fixed inset-0 z-30 bg-black/40 lg:hidden" aria-label="Menüyü kapat" onClick={() => setMenuOpen(false)}/>}
+
       <div className="wms-content">
-        <header className="mx-auto flex w-full max-w-[1600px] items-center justify-between px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))] lg:px-8">
-          <div className="flex items-center gap-3">
-            {!isHome && <button className="icon-button" aria-label="Geri" onClick={() => navigate(-1)}><ArrowLeft size={22}/></button>}
-            <button className="icon-button lg:hidden" aria-label="Menü" onClick={() => setMenuOpen(true)}><Menu size={22}/></button>
-            <Link to="/" className="flex items-center gap-2.5"><span className="grid size-10 place-items-center rounded-xl bg-forest text-acid shadow-sm"><Boxes size={22} strokeWidth={2.4}/></span><span><span className="block text-[10px] font-black uppercase tracking-[0.22em] text-moss">DSDST</span><span className="block text-lg font-black leading-none tracking-tight">Warehouse</span></span></Link>
-          </div>
-          <div className="relative flex items-center gap-2">
-            <span className="hidden rounded-full border border-line bg-white px-3 py-1.5 text-xs font-bold text-muted sm:block">{user?.username}</span>
-            <button
-              className="icon-button"
-              aria-label="Hesap menüsü"
-              aria-expanded={accountMenuOpen}
-              aria-haspopup="menu"
-              title={`${user?.username} · Hesap menüsü`}
-              onClick={() => setAccountMenuOpen((open) => !open)}
-            ><UserRound size={20}/></button>
-            {accountMenuOpen && <>
-              <button className="fixed inset-0 z-40 cursor-default" aria-label="Hesap menüsünü kapat" onClick={() => setAccountMenuOpen(false)}/>
-              <div className="absolute right-0 top-14 z-50 w-64 overflow-hidden rounded-2xl border border-line bg-white p-2 shadow-[0_18px_50px_rgba(7,26,22,.18)]" role="menu">
-                <div className="border-b border-line px-3 py-3">
-                  <p className="text-[10px] font-black uppercase tracking-[.16em] text-moss">Oturum</p>
-                  <p className="mt-1 truncate text-sm font-black text-ink">{user?.username}</p>
-                </div>
-                <Link to="/admin" role="menuitem" className="mt-1 flex min-h-12 items-center gap-3 rounded-xl px-3 text-sm font-black hover:bg-canvas" onClick={() => setAccountMenuOpen(false)}><Settings2 size={19}/>Ayarlar</Link>
-                <button
-                  role="menuitem"
-                  className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-sm font-black text-danger hover:bg-red-50"
-                  onClick={() => { setAccountMenuOpen(false); setLogoutConfirmOpen(true); }}
-                ><LogOut size={19}/>Çıkış Yap</button>
-              </div>
-            </>}
+        <header className="app-header">
+          <Link to="/" aria-label="Ana Sayfa"><Brand dark /></Link>
+          <div className="app-header-actions">
+            <span className={`api-pill api-${apiStatus}`} aria-label={`Panel API: ${apiStatus === "connected" ? "bağlı" : apiStatus === "disconnected" ? "bağlantı sorunu" : "kontrol ediliyor"}`}>
+              <i aria-hidden="true"/>API
+            </span>
+            <button className="header-menu-button mobile-only" type="button" aria-label="Menüyü aç" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}><Menu size={19}/></button>
+            <div className="desktop-account">
+              <button className="header-menu-button" type="button" aria-label="Hesap menüsü" aria-expanded={accountMenuOpen} onClick={() => setAccountMenuOpen((open) => !open)}><UserRound size={19}/></button>
+              {accountMenuOpen && <div className="account-popover" role="menu">
+                <strong>{user?.username}</strong>
+                <Link to="/admin" role="menuitem" onClick={() => setAccountMenuOpen(false)}><Settings2 size={17}/>Ayarlar</Link>
+                <button role="menuitem" onClick={requestLogout}><LogOut size={17}/>Çıkış Yap</button>
+              </div>}
+            </div>
           </div>
         </header>
-        <main className="mx-auto w-full max-w-[1600px] px-4 pb-28 lg:px-8 lg:pb-10">{children}</main>
-        <nav className="mobile-bottom-nav">
-          <NavLink to="/orders"><ClipboardList/><span>Toplama</span></NavLink>
-          {hasWarehousePermission(user, "warehouse:receive") && <NavLink to="/admin/inbound"><PackageCheck/><span>Mal Kabul</span></NavLink>}
-          {hasWarehousePermission(user, "warehouse:accept_returns") && <NavLink to="/returns"><RotateCcw/><span>İade</span></NavLink>}
-          {hasWarehousePermission(user, "warehouse:move_stock") && <NavLink to="/admin/move"><Move/><span>Taşı</span></NavLink>}
-          <NavLink to="/history"><Activity/><span>Geçmiş</span></NavLink>
+
+        <main className="app-main">{children}</main>
+
+        <nav className="mobile-bottom-nav" aria-label="Mobil ana navigasyon">
+          <NavLink to="/" end><Home/><span>Ana Sayfa</span></NavLink>
+          <NavLink to="/orders"><ClipboardList/><span>İşler</span></NavLink>
+          <Link to="/orders" aria-label="Tara: önce sipariş seç"><ScanLine/><span>Tara</span></Link>
+          <button type="button" aria-label="Daha Fazla" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}><MoreHorizontal/><span>Daha Fazla</span></button>
         </nav>
       </div>
-      {logoutConfirmOpen && <div className="fixed inset-0 z-[70] grid place-items-center bg-forest/55 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !logoutBusy) setLogoutConfirmOpen(false); }}>
-        <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="logout-dialog-title" aria-describedby="logout-dialog-description">
-          <span className="grid size-12 place-items-center rounded-2xl bg-red-50 text-danger"><LogOut size={23}/></span>
-          <h2 id="logout-dialog-title" className="mt-5 text-2xl font-black">Çıkış yapmak istiyor musun?</h2>
-          <p id="logout-dialog-description" className="mt-2 text-sm leading-6 text-muted">Aktif oturumun kapatılacak ve giriş ekranına yönlendirileceksin.</p>
-          <div className="mt-6 grid grid-cols-2 gap-3">
-            <button className="secondary-button" disabled={logoutBusy} onClick={() => setLogoutConfirmOpen(false)}>Vazgeç</button>
-            <button className="primary-button !bg-danger" disabled={logoutBusy} onClick={() => void confirmLogout()}>{logoutBusy ? "Çıkılıyor…" : "Evet, çıkış yap"}</button>
+
+      {menuOpen && <div className="drawer-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setMenuOpen(false); }}>
+        <aside className="mobile-drawer" role="dialog" aria-modal="true" aria-labelledby="mobile-drawer-title">
+          <h2 id="mobile-drawer-title" className="sr-only">Daha Fazla</h2>
+          <div className="drawer-heading">
+            <div><Brand/></div>
+            <button ref={drawerCloseRef} className="drawer-close" type="button" aria-label="Menüyü kapat" onClick={() => setMenuOpen(false)}><X size={18}/></button>
           </div>
+          <div className="drawer-user">
+            <div><strong>{user?.username}</strong><small>{user?.role} · Mobil terminal</small></div>
+            <span>AKTİF</span>
+          </div>
+          <nav className="drawer-nav" aria-label="Daha Fazla">
+            {drawerGroups.map((group) => {
+              const items = group.items.filter(canSee);
+              if (!items.length) return null;
+              return <section key={group.title}><h2>{group.title}</h2>{items.map((item) => <Link key={`${group.title}-${item.label}`} to={item.to}>
+                <span className={`drawer-item-icon ${item.tone ? `drawer-${item.tone}` : ""}`}><item.icon size={18}/></span>
+                <span><strong>{item.label}</strong><small>{item.description}</small></span>
+                <span className="drawer-chevron">›</span>
+              </Link>)}</section>;
+            })}
+          </nav>
+          <button className="drawer-logout" type="button" onClick={requestLogout}><LogOut size={18}/>Çıkış Yap</button>
+        </aside>
+      </div>}
+
+      {logoutConfirmOpen && <div className="dialog-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !logoutBusy) setLogoutConfirmOpen(false); }}>
+        <div className="logout-dialog" role="dialog" aria-modal="true" aria-labelledby="logout-dialog-title" aria-describedby="logout-dialog-description">
+          <span className="logout-dialog-icon"><LogOut size={22}/></span>
+          <h2 id="logout-dialog-title">Çıkış yapmak istiyor musun?</h2>
+          <p id="logout-dialog-description">Aktif oturumun kapatılacak ve giriş ekranına yönlendirileceksin.</p>
+          <div><button className="secondary-button" disabled={logoutBusy} onClick={() => setLogoutConfirmOpen(false)}>Vazgeç</button><button className="primary-button danger-button" disabled={logoutBusy} onClick={() => void confirmLogout()}>{logoutBusy ? "Çıkılıyor…" : "Evet, çıkış yap"}</button></div>
         </div>
       </div>}
     </div>

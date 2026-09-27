@@ -29,6 +29,7 @@ import type {
   ShipmentV1, GeliverLivePackage,
 } from "../types/warehouse";
 import type { ReceivingLot, ReceivingSession } from "../types/warehouse";
+import { reportApiResponse, reportApiUnavailable } from "./apiStatus";
 
 interface ApiEnvelope<T> {
   success: boolean;
@@ -75,8 +76,11 @@ const request = async <T>(path: string, init: RequestInit = {}): Promise<ApiEnve
       },
     });
   } catch {
+    reportApiUnavailable();
     throw new ApiError("Panel bağlantısı yok. Ağ bağlantısını kontrol edin.", undefined, "NETWORK_ERROR");
   }
+
+  reportApiResponse(response.status);
 
   const body = (await response.json().catch(() => ({}))) as Partial<ApiEnvelope<T>>;
   if (!response.ok) {

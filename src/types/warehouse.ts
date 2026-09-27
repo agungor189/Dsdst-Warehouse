@@ -419,6 +419,12 @@ export interface WarehouseOrderSummary {
   platform: string | null;
   customer: string | null;
   total_quantity: number;
+  /** Distinct canonical sale product lines, supplied by Panel in the list response. */
+  item_count?: number;
+  /** True only when the order references an active published-kit version in Panel. */
+  has_kit?: boolean;
+  /** True only when a sale line is an assembly or has a canonical BOM in Panel. */
+  has_assembly?: boolean;
   status: OrderStatus;
   created_at: string;
   picker: WarehousePicker | null;
