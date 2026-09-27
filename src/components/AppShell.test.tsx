@@ -36,6 +36,17 @@ describe("AppShell hesap menüsü", () => {
     expect(within(nav).queryByText("Mal Kabul")).not.toBeInTheDocument();
   });
 
+  it("aktif picking ekranında Tara kamerayı doğrudan tetikler", async () => {
+    const scanRequest = vi.fn();
+    window.addEventListener("warehouse:request-scan", scanRequest);
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={["/orders/order-1/pick"]}><AppShell><p>İçerik</p></AppShell></MemoryRouter>);
+
+    await user.click(screen.getByRole("button", { name: "Tara" }));
+    expect(scanRequest).toHaveBeenCalledTimes(1);
+    window.removeEventListener("warehouse:request-scan", scanRequest);
+  });
+
   it("drawer yetkiye göre Mal Kabul gösterir ve çıkışı onay almadan yapmaz", async () => {
     const user = userEvent.setup();
     render(<MemoryRouter><AppShell><p>İçerik</p></AppShell></MemoryRouter>);

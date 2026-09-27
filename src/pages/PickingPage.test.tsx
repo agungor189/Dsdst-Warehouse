@@ -44,10 +44,35 @@ describe("PickingPage", () => {
     const user = userEvent.setup();
     renderPage();
     await user.type(await screen.findByLabelText("Lokasyon / Barkod / SKU okutun"), "A1-K2-P3{enter}");
-    await user.type(await screen.findByLabelText(/Toplanan adet/), "1");
+    const quantity = await screen.findByLabelText(/Toplanan adet/);
+    await user.clear(quantity);
+    await user.type(quantity, "1");
     await user.click(screen.getByRole("button", { name: "Adedi Onayla" }));
     expect(await screen.findByText(/Eksik adet/)).toBeInTheDocument();
     expect(warehouseApi.completePickItem).not.toHaveBeenCalled();
+  });
+
+  it("doğru scan sonrası gerekli adedi otomatik doldurur", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.type(await screen.findByLabelText("Lokasyon / Barkod / SKU okutun"), "8690001{enter}");
+
+    expect(await screen.findByLabelText(/Toplanan adet/)).toHaveValue(2);
+    expect(screen.queryByRole("button", { name: "Kamera ile Tara" })).not.toBeInTheDocument();
+  });
+
+  it("ürün görselini fullscreen preview olarak açıp kapatır", async () => {
+    vi.mocked(warehouseApi.getPickPlan).mockResolvedValue({
+      ...structuredClone(pickPlan),
+      items: [{ ...structuredClone(pickPlan.items[0]), image_url: "/api/products/product-1/image" }],
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Ürün görselini büyüt" }));
+    expect(screen.getByRole("dialog", { name: "Ürün görseli" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Görsel önizlemeyi kapat" }));
+    expect(screen.queryByRole("dialog", { name: "Ürün görseli" })).not.toBeInTheDocument();
   });
 
   it("doğru kod ve tam adedi sunucuya kaydetmeden sonraki adıma geçmez", async () => {
@@ -56,7 +81,7 @@ describe("PickingPage", () => {
     const user = userEvent.setup();
     renderPage();
     await user.type(await screen.findByLabelText("Lokasyon / Barkod / SKU okutun"), "8690001{enter}");
-    await user.type(await screen.findByLabelText(/Toplanan adet/), "2");
+    expect(await screen.findByLabelText(/Toplanan adet/)).toHaveValue(2);
     await user.click(screen.getByRole("button", { name: "Adedi Onayla" }));
     expect(screen.getByText("Kaydediliyor...")).toBeInTheDocument();
     expect(warehouseApi.getPickPlan).toHaveBeenCalledTimes(1);

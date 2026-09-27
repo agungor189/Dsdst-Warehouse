@@ -11,6 +11,8 @@ export function ScanInput({
   cameraTitle = "Lokasyon veya SKU okutun",
   mode = "barcode",
   ocrCandidates = [],
+  variant = "default",
+  listenForScanRequest = false,
 }: {
   onScan: (code: string) => Promise<boolean>;
   busy: boolean;
@@ -19,6 +21,8 @@ export function ScanInput({
   cameraTitle?: string;
   mode?: "barcode" | "both";
   ocrCandidates?: string[];
+  variant?: "default" | "picking";
+  listenForScanRequest?: boolean;
 }) {
   const [code, setCode] = useState("");
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -45,6 +49,12 @@ export function ScanInput({
   useEffect(() => inputRef.current?.focus(), []);
   useEffect(() => { onScanRef.current = onScan; }, [onScan]);
   useEffect(() => { ocrOpenRef.current = ocrOpen; }, [ocrOpen]);
+  useEffect(() => {
+    if (!listenForScanRequest) return;
+    const openCamera = () => { if (!busy) setCameraOpen(true); };
+    window.addEventListener("warehouse:request-scan", openCamera);
+    return () => window.removeEventListener("warehouse:request-scan", openCamera);
+  }, [busy, listenForScanRequest]);
 
   useEffect(() => {
     if (!cameraOpen) return;
@@ -225,14 +235,22 @@ export function ScanInput({
   };
 
   return (
-    <form onSubmit={submit} className="space-y-3">
-      <label htmlFor="scan-code" className="block text-sm font-black">{label}</label>
-      <div className="relative"><ScanBarcode className="absolute left-4 top-1/2 -translate-y-1/2 text-moss" size={25}/><input ref={inputRef} id="scan-code" className="field min-h-16 pl-14 text-lg font-black uppercase" value={code} onChange={(event) => setCode(event.target.value)} autoComplete="off" autoCapitalize="characters" placeholder={placeholder} disabled={busy}/></div>
-      <div className="grid grid-cols-2 gap-3">
+    <form onSubmit={submit} className={variant === "picking" ? "picking-scan-form" : "space-y-3"}>
+      <label htmlFor="scan-code" className={variant === "picking" ? "picking-scan-label" : "block text-sm font-black"}>{label}</label>
+      <div className={variant === "picking" ? "picking-scan-row" : undefined}>
+        <div className={variant === "picking" ? "picking-scan-field" : "relative"}>
+          {variant === "picking"
+            ? <button type="button" className="picking-scan-camera" aria-label="Kamerayı aç" disabled={busy} onClick={() => setCameraOpen(true)}><ScanBarcode size={20}/></button>
+            : <ScanBarcode className="absolute left-4 top-1/2 -translate-y-1/2 text-moss" size={25}/>}
+          <input ref={inputRef} id="scan-code" className={variant === "picking" ? "picking-scan-input" : "field min-h-16 pl-14 text-lg font-black uppercase"} value={code} onChange={(event) => setCode(event.target.value)} autoComplete="off" autoCapitalize="characters" placeholder={placeholder} disabled={busy}/>
+        </div>
+        {variant === "picking" && <button className="primary-button picking-scan-submit" disabled={!code.trim() || busy} type="submit">{busy ? "Kontrol…" : "Doğrula"}</button>}
+      </div>
+      {variant !== "picking" && <div className="grid grid-cols-2 gap-3">
         <button className="secondary-button min-h-14" disabled={busy} type="button" onClick={() => setCameraOpen(true)}><Camera size={21}/> Kamera ile Tara</button>
         {mode === "both" && <button className="secondary-button min-h-14" disabled={busy} type="button" onClick={() => setOcrOpen(true)}><ScanText size={21}/>Kamera ile Yazıyı Tara</button>}
         <button className={`primary-button w-full ${mode === "both" ? "col-span-2" : ""}`} disabled={!code.trim() || busy} type="submit">{busy ? "Kontrol ediliyor..." : "Doğrula"}</button>
-      </div>
+      </div>}
       {cameraOpen && (
         <div className="fixed inset-0 z-[70] flex flex-col bg-forest text-white" role="dialog" aria-modal="true" aria-label="Kamera ile kod tara">
           <div className="flex items-center justify-between px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))]">

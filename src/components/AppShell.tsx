@@ -4,7 +4,7 @@ import {
   ScanLine, Send, Settings2, Truck, UserRound, X,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ComponentType, type PropsWithChildren } from "react";
-import { Link, NavLink, useLocation } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { hasWarehousePermission, useAuth } from "../features/auth/AuthContext";
 import { useApiStatus } from "../lib/apiStatus";
 import type { WarehousePermission } from "../types/warehouse";
@@ -69,6 +69,7 @@ function Brand({ dark = false }: { dark?: boolean }) {
 
 export function AppShell({ children }: PropsWithChildren) {
   const location = useLocation();
+  const navigate = useNavigate();
   const { user, logout } = useAuth();
   const apiStatus = useApiStatus();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -76,6 +77,8 @@ export function AppShell({ children }: PropsWithChildren) {
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const drawerCloseRef = useRef<HTMLButtonElement>(null);
+  const pickingFlow = /^\/orders\/[^/]+(?:\/pick)?$/.test(location.pathname);
+  const activePicking = /^\/orders\/[^/]+\/pick$/.test(location.pathname);
 
   const canSee = (item: NavItem) => !item.permission || hasWarehousePermission(user, item.permission);
   const visibleDesktopLinks = desktopLinks.filter((item) => "section" in item || canSee(item));
@@ -105,6 +108,14 @@ export function AppShell({ children }: PropsWithChildren) {
     setLogoutConfirmOpen(true);
   };
 
+  const requestScan = () => {
+    if (activePicking) {
+      window.dispatchEvent(new Event("warehouse:request-scan"));
+      return;
+    }
+    navigate("/orders");
+  };
+
   return (
     <div className="app-shell">
       <aside className="wms-sidebar" aria-label="Masaüstü navigasyon">
@@ -114,7 +125,7 @@ export function AppShell({ children }: PropsWithChildren) {
           : <NavLink key={`${item.label}-${item.to}`} to={item.to} className={({ isActive }) => `sidebar-link ${isActive ? "sidebar-link-active" : ""}`}><item.icon size={18}/>{item.label}</NavLink>)}</nav>
       </aside>
 
-      <div className="wms-content">
+      <div className={`wms-content ${pickingFlow ? "picking-flow" : ""}`}>
         <header className="app-header">
           <Link to="/" aria-label="Ana Sayfa"><Brand dark /></Link>
           <div className="app-header-actions">
@@ -138,7 +149,7 @@ export function AppShell({ children }: PropsWithChildren) {
         <nav className="mobile-bottom-nav" aria-label="Mobil ana navigasyon">
           <NavLink to="/" end><Home/><span>Ana Sayfa</span></NavLink>
           <NavLink to="/orders"><ClipboardList/><span>İşler</span></NavLink>
-          <Link to="/orders" aria-label="Tara: önce sipariş seç"><ScanLine/><span>Tara</span></Link>
+          <button type="button" className={activePicking ? "scan-active" : ""} aria-label="Tara" onClick={requestScan}><ScanLine/><span>Tara</span></button>
           <button type="button" aria-label="Daha Fazla" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}><MoreHorizontal/><span>Daha Fazla</span></button>
         </nav>
       </div>

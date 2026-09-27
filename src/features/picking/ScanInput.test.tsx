@@ -129,6 +129,14 @@ describe("ScanInput kamera taraması", () => {
     expect(screen.getByRole("button", { name: "Kamera ile Tara" })).toBeInTheDocument();
   });
 
+  it("picking görünümünde ayrı kamera butonu göstermez ve Tara isteği kamerayı doğrudan açar", async () => {
+    render(<ScanInput variant="picking" listenForScanRequest onScan={vi.fn().mockResolvedValue(true)} busy={false}/>);
+    expect(screen.queryByRole("button", { name: "Kamera ile Tara" })).not.toBeInTheDocument();
+
+    window.dispatchEvent(new Event("warehouse:request-scan"));
+    expect(await screen.findByRole("dialog", { name: "Kamera ile kod tara" })).toBeInTheDocument();
+  });
+
   it("OCR kamerası kapatılınca tüm media tracklerini durdurur", async () => {
     const tracks = [{ stop: vi.fn() }, { stop: vi.fn() }];
     Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => tracks }) } });
