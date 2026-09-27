@@ -520,22 +520,7 @@ export function createWarehouseApp(config) {
         idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
     }));
     app.post("/api/shipping/v1/shipments/:id/geliver/offers", requireSession, (req, res) => {
-        const rawRecipient = req.body?.recipient;
-        const recipient = rawRecipient && typeof rawRecipient === "object" && !Array.isArray(rawRecipient) ? {
-            name: safeQueryText(rawRecipient.name, 200),
-            email: safeQueryText(rawRecipient.email, 320),
-            phone: safeQueryText(rawRecipient.phone, 50) || null,
-            address1: safeQueryText(rawRecipient.address1, 500),
-            address2: safeQueryText(rawRecipient.address2, 500) || null,
-            countryCode: safeQueryText(rawRecipient.countryCode, 3).toUpperCase(),
-            cityName: safeQueryText(rawRecipient.cityName, 100),
-            cityCode: safeQueryText(rawRecipient.cityCode, 30),
-            districtName: safeQueryText(rawRecipient.districtName, 100),
-            districtID: safeQueryText(rawRecipient.districtID, 50) || null,
-            zip: safeQueryText(rawRecipient.zip, 30) || null,
-        } : null;
         return forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/geliver/offers`, undefined, {
-            ...(recipient ? { recipient } : {}),
             idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
         });
     });

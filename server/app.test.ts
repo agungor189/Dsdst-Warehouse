@@ -169,7 +169,7 @@ describe("Warehouse BFF", () => {
     expect(called).toBe(false);
   });
 
-  it("V2-13 forwards recipient-only live Geliver offer flow, selected offer, refresh, and pre-handoff cancel", async () => {
+  it("V2-13 ignores Warehouse recipient overrides and forwards the canonical-recipient Geliver flow", async () => {
     const received: Array<{ method: string; path: string; body: any }> = [];
     const panelUrl = await startPanel((req, res) => {
       received.push({ method: req.method, path: req.path, body: req.body });
@@ -188,10 +188,7 @@ describe("Warehouse BFF", () => {
     await request(app).post("/api/shipping/v1/shipments/ship-1/cancel").set(headers)
       .send({ reason: "CUSTOMER_REQUEST", cancelledAt: "2026-09-23T13:00:00.000Z", idempotency_key: "cancel-op", providerShipmentId: "drop" }).expect(200);
     expect(received).toEqual([
-      { method: "POST", path: "/api/warehouse/v1/shipping/shipments/ship-1/geliver/offers", body: { recipient: {
-        name: "Customer", email: "customer@example.test", phone: "555", address1: "Address 1", address2: "Address 2",
-        countryCode: "TR", cityName: "Istanbul", cityCode: "34", districtName: "Kadikoy", districtID: "1", zip: "34710",
-      }, idempotency_key: "offers-op" } },
+      { method: "POST", path: "/api/warehouse/v1/shipping/shipments/ship-1/geliver/offers", body: { idempotency_key: "offers-op" } },
       { method: "POST", path: "/api/warehouse/v1/shipping/shipments/ship-1/geliver/offers/offer-1/accept", body: { idempotency_key: "accept-op" } },
       { method: "POST", path: "/api/warehouse/v1/shipping/shipments/ship-1/geliver/refresh", body: { idempotency_key: "refresh-op" } },
       { method: "POST", path: "/api/warehouse/v1/shipping/shipments/ship-1/cancel", body: {
