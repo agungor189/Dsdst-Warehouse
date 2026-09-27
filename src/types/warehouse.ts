@@ -77,6 +77,8 @@ export interface GeliverLivePackage {
   packageId: string;
   providerOrderNumber: string;
   createState: string;
+  providerStatusCode: string | null;
+  offerPollingState: "PENDING" | "READY" | "TIMED_OUT" | "COMPLETE_EMPTY";
   bookingState: string | null;
   providerTransactionId: string | null;
   barcode: string | null;

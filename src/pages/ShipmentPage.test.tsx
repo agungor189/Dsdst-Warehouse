@@ -8,10 +8,14 @@ const api = vi.hoisted(() => ({
   list: vi.fn(),
   get: vi.fn(),
   loadGeliverOffers: vi.fn(),
+  refreshGeliver: vi.fn(),
 }));
 
 vi.mock("../lib/api", () => ({
   shipmentApi: api,
+  ApiError: class ApiError extends Error {
+    constructor(message: string, public status?: number, public code?: string) { super(message); }
+  },
   getErrorMessage: (error: unknown) => error instanceof Error ? error.message : String(error),
 }));
 vi.mock("../features/auth/AuthContext", () => ({
@@ -56,6 +60,22 @@ const offerReadyDetail = {
   }],
 };
 
+const livePackage = (offerPollingState: "READY" | "PENDING" | "TIMED_OUT" | "COMPLETE_EMPTY", offers: any[] = []) => ({
+  providerShipmentId: "provider-1",
+  packageId: "package-1",
+  providerOrderNumber: "SHO-8415454003267-P1",
+  createState: "CREATED",
+  bookingState: null,
+  providerTransactionId: null,
+  providerStatusCode: offerPollingState === "COMPLETE_EMPTY" ? "GOT_OFFERS" : "CREATED",
+  offerPollingState,
+  barcode: null,
+  selectedOffer: null,
+  offers,
+  tracking: { number: null, url: null, stateCode: null },
+  label: null,
+});
+
 describe("Fulfillment mobile flow", () => {
   beforeEach(() => {
     api.list.mockReset().mockResolvedValue([{ id: detail.id, orderId: detail.orderId, orderNumber: detail.orderNumber,
@@ -63,6 +83,7 @@ describe("Fulfillment mobile flow", () => {
       customerName: "Arda Gungor", createdAt: "2026-09-28T00:00:00Z", updatedAt: "2026-09-28T00:00:00Z" }]);
     api.get.mockReset().mockResolvedValue(detail);
     api.loadGeliverOffers.mockReset().mockResolvedValue([]);
+    api.refreshGeliver.mockReset().mockResolvedValue([]);
   });
 
   it("toplaması tamamlanan siparişleri platform, müşteri, satır ve adet özetiyle paketleme kuyruğunda gösterir", async () => {
@@ -116,5 +137,45 @@ describe("Fulfillment mobile flow", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("canonical sipariş kaydını düzeltin");
     expect(screen.queryByText("Alıcı adresi")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Geliver Kargo Tekliflerini Getir" })).toBeDisabled();
+  });
+
+  it("Geliver polling sürerken hazırlık durumunu, timeout sonrasında yenile aksiyonunu gösterir", async () => {
+    const user = userEvent.setup();
+    api.get.mockResolvedValue(offerReadyDetail);
+    let resolveOffers!: (value: any[]) => void;
+    api.loadGeliverOffers.mockReturnValue(new Promise<any[]>((resolve) => { resolveOffers = resolve; }));
+
+    render(<MemoryRouter initialEntries={["/shipments?shipmentId=ship-1"]}><ShipmentPage/></MemoryRouter>);
+    await user.click(await screen.findByRole("button", { name: "Geliver Kargo Tekliflerini Getir" }));
+
+    expect(screen.getByText("Kargo teklifleri hazırlanıyor…")).toBeInTheDocument();
+    resolveOffers([livePackage("TIMED_OUT")]);
+    expect(await screen.findByText("Teklifler henüz hazır değil")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Teklifleri Yenile" })).toBeInTheDocument();
+    expect(screen.queryByText("Teklif bulunamadı.")).not.toBeInTheDocument();
+  });
+
+  it("Teklif bulunamadı mesajını yalnız provider teklif üretimini tamamladığında gösterir", async () => {
+    const user = userEvent.setup();
+    api.get.mockResolvedValue(offerReadyDetail);
+    api.loadGeliverOffers.mockResolvedValue([livePackage("COMPLETE_EMPTY")]);
+
+    render(<MemoryRouter initialEntries={["/shipments?shipmentId=ship-1"]}><ShipmentPage/></MemoryRouter>);
+    await user.click(await screen.findByRole("button", { name: "Geliver Kargo Tekliflerini Getir" }));
+
+    expect(await screen.findByText("Teklif bulunamadı.")).toBeInTheDocument();
+    expect(screen.queryByText("Teklifler henüz hazır değil")).not.toBeInTheDocument();
+  });
+
+  it("Geliver FAILED provider hata kodu ve mesajını operatöre gösterir", async () => {
+    const user = userEvent.setup();
+    api.get.mockResolvedValue(offerReadyDetail);
+    api.loadGeliverOffers.mockRejectedValue(new Error("Geliver shipment failed (ADDRESS_REJECTED: Recipient district is not serviceable)."));
+
+    render(<MemoryRouter initialEntries={["/shipments?shipmentId=ship-1"]}><ShipmentPage/></MemoryRouter>);
+    await user.click(await screen.findByRole("button", { name: "Geliver Kargo Tekliflerini Getir" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("ADDRESS_REJECTED");
+    expect(screen.getByRole("alert")).toHaveTextContent("Recipient district is not serviceable");
   });
 });
