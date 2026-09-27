@@ -7,6 +7,7 @@ import ShipmentPage from "./ShipmentPage";
 const api = vi.hoisted(() => ({
   list: vi.fn(),
   get: vi.fn(),
+  definePackages: vi.fn(),
   loadGeliverOffers: vi.fn(),
   refreshGeliver: vi.fn(),
 }));
@@ -82,6 +83,7 @@ describe("Fulfillment mobile flow", () => {
       sourceChannel: detail.sourceChannel, reservationId: detail.reservationId, state: detail.state, packageCount: 0,
       customerName: "Arda Gungor", createdAt: "2026-09-28T00:00:00Z", updatedAt: "2026-09-28T00:00:00Z" }]);
     api.get.mockReset().mockResolvedValue(detail);
+    api.definePackages.mockReset().mockResolvedValue(undefined);
     api.loadGeliverOffers.mockReset().mockResolvedValue([]);
     api.refreshGeliver.mockReset().mockResolvedValue([]);
   });
@@ -104,6 +106,39 @@ describe("Fulfillment mobile flow", () => {
     expect(screen.getByLabelText("Yükseklik (cm)")).toHaveValue("25");
     await user.click(screen.getByRole("button", { name: "Paket ekle" }));
     expect(screen.getByText(/Paket 2/i)).toBeInTheDocument();
+  });
+
+  it("paket ağırlığını kg olarak alır ve API'ye güvenli biçimde gram gönderir", async () => {
+    const user = userEvent.setup();
+    api.get.mockResolvedValueOnce(detail).mockResolvedValueOnce(offerReadyDetail);
+    render(<MemoryRouter initialEntries={["/shipments?shipmentId=ship-1"]}><ShipmentPage/></MemoryRouter>);
+
+    await user.click(await screen.findByRole("button", { name: /Küçük/ }));
+    await user.type(screen.getByLabelText("Ağırlık (kg)"), "2,03");
+    await user.click(screen.getByRole("button", { name: /Paketleri Kaydet ve Devam Et/ }));
+
+    await waitFor(() => expect(api.definePackages).toHaveBeenCalledWith("ship-1", [{
+      packageNumber: 1,
+      measured: { lengthMm: 300, widthMm: 200, heightMm: 200, weightGrams: 2030 },
+      contents: [{ productId: "p-1", quantityBaseInt: 18 }],
+    }], expect.any(String)));
+  });
+
+  it("boş Türkiye ilçesini provider doğrulamasına bırakır ve manuel adres formu göstermez", async () => {
+    const user = userEvent.setup();
+    api.get.mockResolvedValue({
+      ...offerReadyDetail,
+      recipient: { ...completeRecipient, districtName: "", districtID: null, address1: "Bahçelievler, Adnan Kahveci Blv." },
+    });
+
+    render(<MemoryRouter initialEntries={["/shipments?shipmentId=ship-1"]}><ShipmentPage/></MemoryRouter>);
+
+    expect(await screen.findByText("Arda Gungor")).toBeInTheDocument();
+    expect(screen.queryByText("Alıcı adresi")).not.toBeInTheDocument();
+    const button = screen.getByRole("button", { name: "Geliver Kargo Tekliflerini Getir" });
+    expect(button).toBeEnabled();
+    await user.click(button);
+    await waitFor(() => expect(api.loadGeliverOffers).toHaveBeenCalledWith("ship-1", expect.any(String)));
   });
 
   it.each(["SHOPIFY", "TRENDYOL"])("%s shipment recipient adresini salt okunur gösterir ve Geliver teklifini snapshot ile alır", async (sourceChannel) => {
@@ -133,7 +168,7 @@ describe("Fulfillment mobile flow", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Sipariş teslimat bilgileri eksik");
     expect(screen.getByRole("alert")).toHaveTextContent("telefon");
-    expect(screen.getByRole("alert")).toHaveTextContent("ilçe");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("ilçe");
     expect(screen.getByRole("alert")).toHaveTextContent("canonical sipariş kaydını düzeltin");
     expect(screen.queryByText("Alıcı adresi")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Geliver Kargo Tekliflerini Getir" })).toBeDisabled();
