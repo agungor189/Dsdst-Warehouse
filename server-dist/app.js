@@ -467,6 +467,16 @@ export function createWarehouseApp(config) {
     app.post("/api/inventory/v1/reservations/:id/dispatch", requireSession, (req, res) => res.status(409).json({ success: false, error: { code: "PHYSICAL_HANDOFF_REQUIRED",
             message: "Stok çıkışı yalnız doğrulanmış fiziksel taşıyıcı teslimiyle yapılabilir." } }));
     app.get("/api/shipping/v1/provider-contracts/geliver", requireSession, (req, res) => forward(req, res, "GET", "/shipping/provider-contracts/geliver"));
+    app.get("/api/shipping/v1/shipments", requireSession, (req, res) => {
+        const query = new URLSearchParams();
+        const requestedScope = safeQueryText(req.query.scope, 20).toLowerCase();
+        query.set("scope", ["pending", "completed", "all"].includes(requestedScope) ? requestedScope : "pending");
+        const search = safeQueryText(req.query.q, 120);
+        if (search)
+            query.set("q", search);
+        query.set("limit", String(safePositiveInteger(req.query.limit, 200, 500)));
+        return forward(req, res, "GET", "/shipping/shipments", query);
+    });
     app.get("/api/shipping/v1/shipments/:id", requireSession, (req, res) => forward(req, res, "GET", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}`));
     app.get("/api/shipping/v1/reservations/:id/shipment", requireSession, (req, res) => forward(req, res, "GET", `/shipping/reservations/${encodeURIComponent(String(req.params.id))}/shipment`));
     app.post("/api/shipping/v1/shipments/:id/packages", requireSession, (req, res) => {
@@ -509,18 +519,26 @@ export function createWarehouseApp(config) {
         requestedAt: safeQueryText(req.body?.requestedAt, 50) || null,
         idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
     }));
-    app.post("/api/shipping/v1/shipments/:id/geliver/offers", requireSession, (req, res) => forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/geliver/offers`, undefined, {
-        recipient: {
-            name: safeQueryText(req.body?.recipient?.name, 200), email: safeQueryText(req.body?.recipient?.email, 320),
-            phone: safeQueryText(req.body?.recipient?.phone, 50) || null,
-            address1: safeQueryText(req.body?.recipient?.address1, 500), address2: safeQueryText(req.body?.recipient?.address2, 500) || null,
-            countryCode: safeQueryText(req.body?.recipient?.countryCode, 3).toUpperCase(),
-            cityName: safeQueryText(req.body?.recipient?.cityName, 100), cityCode: safeQueryText(req.body?.recipient?.cityCode, 30),
-            districtName: safeQueryText(req.body?.recipient?.districtName, 100), districtID: safeQueryText(req.body?.recipient?.districtID, 50) || null,
-            zip: safeQueryText(req.body?.recipient?.zip, 30) || null,
-        },
-        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
-    }));
+    app.post("/api/shipping/v1/shipments/:id/geliver/offers", requireSession, (req, res) => {
+        const rawRecipient = req.body?.recipient;
+        const recipient = rawRecipient && typeof rawRecipient === "object" && !Array.isArray(rawRecipient) ? {
+            name: safeQueryText(rawRecipient.name, 200),
+            email: safeQueryText(rawRecipient.email, 320),
+            phone: safeQueryText(rawRecipient.phone, 50) || null,
+            address1: safeQueryText(rawRecipient.address1, 500),
+            address2: safeQueryText(rawRecipient.address2, 500) || null,
+            countryCode: safeQueryText(rawRecipient.countryCode, 3).toUpperCase(),
+            cityName: safeQueryText(rawRecipient.cityName, 100),
+            cityCode: safeQueryText(rawRecipient.cityCode, 30),
+            districtName: safeQueryText(rawRecipient.districtName, 100),
+            districtID: safeQueryText(rawRecipient.districtID, 50) || null,
+            zip: safeQueryText(rawRecipient.zip, 30) || null,
+        } : null;
+        return forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/geliver/offers`, undefined, {
+            ...(recipient ? { recipient } : {}),
+            idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+        });
+    });
     app.post("/api/shipping/v1/shipments/:id/geliver/refresh", requireSession, (req, res) => forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/geliver/refresh`, undefined, {
         idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
     }));
@@ -534,6 +552,17 @@ export function createWarehouseApp(config) {
     app.post("/api/shipping/v1/shipments/:id/cancel", requireSession, (req, res) => forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/cancel`, undefined, {
         reason: safeQueryText(req.body?.reason, 500),
         cancelledAt: safeQueryText(req.body?.cancelledAt, 50) || null,
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
+    app.post("/api/shipping/v1/shipments/bulk-handoff", requireSession, (req, res) => forward(req, res, "POST", "/shipping/shipments/bulk-handoff", undefined, {
+        shipmentIds: Array.isArray(req.body?.shipmentIds)
+            ? req.body.shipmentIds.slice(0, 50).map((value) => safeQueryText(value, 500)).filter(Boolean)
+            : [],
+        handedOffAt: safeQueryText(req.body?.handedOffAt, 50),
+        handoffEvidence: {
+            kind: safeQueryText(req.body?.handoffEvidence?.kind, 100),
+            reference: safeQueryText(req.body?.handoffEvidence?.reference, 500),
+        },
         idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
     }));
     app.post("/api/shipping/v1/shipments/:id/handoff", requireSession, (req, res) => forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/handoff`, undefined, {
@@ -571,6 +600,7 @@ export function createWarehouseApp(config) {
         idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
     }));
     app.get("/api/orders/:id", requireSession, (req, res) => forward(req, res, "GET", `/orders/${encodeURIComponent(String(req.params.id))}`));
+    app.get("/api/orders/:id/reservation", requireSession, (req, res) => forward(req, res, "GET", `/orders/${encodeURIComponent(String(req.params.id))}/reservation`));
     app.get("/api/orders/:id/pick-plan", requireSession, (req, res) => forward(req, res, "GET", `/orders/${encodeURIComponent(String(req.params.id))}/pick-plan`));
     app.get("/api/scan/:code", requireSession, (req, res) => forward(req, res, "GET", `/scan/${encodeURIComponent(String(req.params.code))}`));
     app.get("/api/products/:id/image", requireSession, (req, res) => forward(req, res, "GET", `/products/${encodeURIComponent(String(req.params.id))}/image`, undefined, undefined, true));

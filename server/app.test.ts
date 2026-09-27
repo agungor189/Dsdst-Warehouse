@@ -122,6 +122,41 @@ describe("Warehouse BFF", () => {
     } });
   });
 
+  it("fulfillment shipment list query is whitelisted to the Panel-owned gateway", async () => {
+    let received: { path?: string; query?: unknown } = {};
+    const panelUrl = await startPanel((req, res) => {
+      received = { path: req.path, query: req.query };
+      res.json({ success: true, contract: "dsdst.shipment-list.v1", data: [] });
+    });
+    await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .get("/api/shipping/v1/shipments?scope=pending&q=SHO-1&limit=999&unsafe=drop")
+      .set("Cookie", sessionCookie)
+      .expect(200);
+    expect(received).toEqual({
+      path: "/api/warehouse/v1/shipping/shipments",
+      query: { scope: "pending", q: "SHO-1", limit: "500" },
+    });
+  });
+
+  it("bulk handoff forwards only selected shipment ids, evidence and one stable operation key", async () => {
+    let received: { path?: string; body?: unknown } = {};
+    const panelUrl = await startPanel((req, res) => {
+      received = { path: req.path, body: req.body };
+      res.json({ success: true, contract: "dsdst.shipment-bulk-handoff.v1", data: [], summary: { requested: 2, dispatched: 2, failed: 0, alreadyProcessed: 0 } });
+    });
+    await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .post("/api/shipping/v1/shipments/bulk-handoff")
+      .set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
+      .send({ shipmentIds: ["ship-1", "ship-2"], handedOffAt: "2026-09-28T09:00:00.000Z",
+        handoffEvidence: { kind: "OPERATOR_CARRIER_HANDOFF", reference: "dock-7", unsafe: "drop" },
+        idempotency_key: "bulk-op", central_stock: -99 });
+    expect(received).toEqual({
+      path: "/api/warehouse/v1/shipping/shipments/bulk-handoff",
+      body: { shipmentIds: ["ship-1", "ship-2"], handedOffAt: "2026-09-28T09:00:00.000Z",
+        handoffEvidence: { kind: "OPERATOR_CARRIER_HANDOFF", reference: "dock-7" }, idempotency_key: "bulk-op" },
+    });
+  });
+
   it("V2-13 rejects COD locally and does not call Panel", async () => {
     let called = false;
     const panelUrl = await startPanel((_req, res) => { called = true; res.status(500).end(); });

@@ -223,10 +223,14 @@ export function ScanInput({
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const value = code.trim();
     if (!value || busy) return;
     const success = await onScan(value);
-    if (success) setCode("");
+    if (success) {
+      setCode("");
+      activeElement?.blur();
+    }
   };
 
   return (

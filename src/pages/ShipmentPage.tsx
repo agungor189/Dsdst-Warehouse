@@ -1,185 +1,86 @@
-import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { PackageCheck, Printer, RefreshCw, Truck, XCircle } from "lucide-react";
+import { ArrowLeft, Box, Check, CheckCircle2, ChevronRight, CircleAlert, PackageCheck, Plus, Printer, RefreshCw, RotateCcw, Truck, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { hasWarehousePermission, useAuth } from "../features/auth/AuthContext";
-import { shipmentApi } from "../lib/api";
-import type { GeliverLivePackage, ShipmentV1 } from "../types/warehouse";
+import { packageCarrierName, shippingPrintJobFor } from "../features/shipping/shipmentPresentation";
+import { ApiError, getErrorMessage, shipmentApi, warehouseAdminApi, type PrintJob, type ReprintReason } from "../lib/api";
+import type { BulkHandoffResult, GeliverLivePackage, ShipmentListItem, ShipmentV1 } from "../types/warehouse";
 
-type PackageDraft = { lengthMm: string; widthMm: string; heightMm: string; weightGrams: string; contents: Record<string, string> };
-const emptyRecipient = { name: "", email: "", phone: "", address1: "", address2: "", countryCode: "TR",
-  cityName: "", cityCode: "", districtName: "", districtID: "", zip: "" };
+type Draft = { template: string; length: string; width: string; height: string; weight: string; contents: Record<string, string> };
+type QueueItem = ShipmentListItem & { detail?: ShipmentV1 };
+type Notice = { kind: "error" | "success" | "info"; message: string; code?: string };
+const boxes = [{ name: "Küçük", size: [30,20,20] }, { name: "Orta", size: [40,30,25] }, { name: "Büyük", size: [50,40,30] }, { name: "Uzun", size: [100,30,30] }] as const;
+const emptyRecipient = { name:"", email:"", phone:"", address1:"", address2:"", countryCode:"TR", cityName:"", cityCode:"", districtName:"", districtID:"", zip:"" };
+const key = (): string => crypto.randomUUID();
+const statusText: Record<string,string> = { PREPARING:"PAKETLENİYOR", CARRIER_SELECTED:"TEKLİF SEÇİLDİ", BOOKED:"ETİKET HAZIRLANIYOR", LABEL_READY:"SEVKE HAZIR", DISPATCHED:"SEVK EDİLDİ", EXCEPTION:"İNCELENMELİ" };
+const preservedActionLabels = ["İptal et", "Fiziksel teslimi doğrula"] as const;
+const fail = (error: unknown): Notice => ({ kind:"error", message:getErrorMessage(error), code:error instanceof ApiError ? error.code : undefined });
+const packageName = (shipment: ShipmentV1, pack: ShipmentV1["packages"][number]) => `${shipment.orderNumber} · Paket ${pack.packageNumber} · ${pack.id.slice(0,8)}`;
+const price = (amount?: string | null, currency?: string | null) => {
+  const numeric = Number(amount); if (!Number.isFinite(numeric)) return `${amount || "—"} ${currency || ""}`.trim();
+  try { return new Intl.NumberFormat("tr-TR", { style:"currency", currency:currency || "TRY" }).format(numeric); } catch { return `${amount} ${currency}`; }
+};
 
-export default function ShipmentPage() {
-  const { user } = useAuth();
-  const [searchParams] = useSearchParams();
-  const [shipmentId, setShipmentId] = useState(() => searchParams.get("shipmentId") || "");
-  const [shipment, setShipment] = useState<ShipmentV1 | null>(null);
-  const [packageDrafts, setPackageDrafts] = useState<PackageDraft[]>([]);
-  const [recipient, setRecipient] = useState(emptyRecipient);
-  const [livePackages, setLivePackages] = useState<GeliverLivePackage[]>([]);
-  const [handoffReference, setHandoffReference] = useState("");
-  const [actualCharge, setActualCharge] = useState("");
-  const [cancelReason, setCancelReason] = useState("");
-  const [feedback, setFeedback] = useState("");
-  const [busy, setBusy] = useState(false);
-  const canManage = hasWarehousePermission(user, "shipping:manage");
-  const canDispatch = hasWarehousePermission(user, "shipping:dispatch");
-  const canPrint = hasWarehousePermission(user, "warehouse:print_labels");
+function Header({ title, back }: { title:string; back?:string }) { return <header className="fulfillment-page-header">{back ? <Link to={back} aria-label="Geri"><ArrowLeft size={18}/></Link> : <span/>}<h1>{title}</h1><span/></header>; }
+function Alert({ value }: { value:Notice | null }) { return value ? <div className={`fulfillment-feedback ${value.kind}`} role={value.kind === "error" ? "alert" : "status"}>{value.kind === "error" ? <CircleAlert size={18}/> : <CheckCircle2 size={18}/>}<span>{value.message}{value.code && <small>Hata kodu: {value.code}</small>}</span></div> : null; }
 
-  const defaultDraft = (current: ShipmentV1, includeAll: boolean): PackageDraft => ({ lengthMm: "", widthMm: "", heightMm: "", weightGrams: "",
-    contents: Object.fromEntries(current.requiredContents.map((item) => [item.productId, includeAll ? String(item.quantityBaseInt) : "0"])) });
-
-  const load = async () => {
-    if (!shipmentId.trim()) return;
-    setBusy(true); setFeedback(""); setLivePackages([]);
-    try { setShipment(await shipmentApi.get(shipmentId.trim())); }
-    catch (error: any) { setFeedback(error.message); }
-    finally { setBusy(false); }
-  };
-
-  useEffect(() => { setShipment(null); setPackageDrafts([]); setLivePackages([]); }, [shipmentId]);
-  // initial shipment from query
-  useEffect(() => {
-    if (!shipmentId.trim()) return;
-    void load();
-  }, []);
-  useEffect(() => {
-    if (shipment?.state === "PREPARING" && shipment.packageCount === 0 && packageDrafts.length === 0) setPackageDrafts([defaultDraft(shipment, true)]);
-    if (shipment?.recipient) setRecipient({ ...emptyRecipient, ...shipment.recipient,
-      phone: shipment.recipient.phone || "", address2: shipment.recipient.address2 || "",
-      districtID: shipment.recipient.districtID || "", zip: shipment.recipient.zip || "" });
-  }, [shipment]);
-
-  const definePackages = async () => {
-    setBusy(true); setFeedback("");
-    try {
-      const packages = packageDrafts.map((draft, index) => ({ packageNumber: index + 1,
-        measured: { lengthMm: Number(draft.lengthMm), widthMm: Number(draft.widthMm), heightMm: Number(draft.heightMm), weightGrams: Number(draft.weightGrams) },
-        contents: shipment!.requiredContents.map((item) => ({ productId: item.productId, quantityBaseInt: Number(draft.contents[item.productId] || 0) }))
-          .filter((item) => item.quantityBaseInt > 0) }));
-      await shipmentApi.definePackages(shipment!.id, packages);
-      setShipment(await shipmentApi.get(shipment!.id)); setFeedback("Ölçülen paket verileri kaydedildi.");
-    } catch (error: any) { setFeedback(error.message); } finally { setBusy(false); }
-  };
-
-  const automaticMarketplaceRecipient = shipment?.sourceChannel?.toUpperCase() === "TRENDYOL";
-
-  const loadOffers = async () => {
-    setBusy(true); setFeedback("");
-    try {
-      const data = await shipmentApi.loadGeliverOffers(
-        shipment!.id,
-        automaticMarketplaceRecipient ? undefined : recipient,
-      );
-      setLivePackages(data); setShipment(await shipmentApi.get(shipment!.id));
-      setFeedback(data.some((item) => item.offers.length) ? "Canlı Geliver teklifleri alındı; seçim operatöre bırakıldı." : "Teklifler henüz hazır değil; yenileyin.");
-    } catch (error: any) { setFeedback(error.message); } finally { setBusy(false); }
-  };
-
-  const refresh = async () => {
-    setBusy(true); setFeedback("");
-    try { setLivePackages(await shipmentApi.refreshGeliver(shipment!.id)); setShipment(await shipmentApi.get(shipment!.id)); setFeedback("Geliver durumu yenilendi."); }
-    catch (error: any) { setFeedback(error.message); } finally { setBusy(false); }
-  };
-
-  const acceptOffer = async (offerId: string) => {
-    setBusy(true); setFeedback("");
-    try { setShipment(await shipmentApi.acceptGeliverOffer(shipment!.id, offerId)); setLivePackages(await shipmentApi.refreshGeliver(shipment!.id));
-      setFeedback("Seçilen Geliver teklifi kabul edildi."); }
-    catch (error: any) { setFeedback(error.message); } finally { setBusy(false); }
-  };
-
-  const printNativeLabel = async (packageId: string) => {
-    setBusy(true); setFeedback("");
-    try { const job = await shipmentApi.queueNativeLabel(shipment!.id, packageId); setFeedback(`${job.subject_code} sağlayıcı etiketi kuyruğa alındı; fiziksel baskı henüz doğrulanmadı.`); }
-    catch (error: any) { setFeedback(error.message); } finally { setBusy(false); }
-  };
-
-  const cancel = async () => {
-    setBusy(true); setFeedback("");
-    try { setShipment(await shipmentApi.cancel(shipment!.id, cancelReason)); setFeedback("Sevkiyat teslim öncesi iptal edildi."); }
-    catch (error: any) { setFeedback(error.message); } finally { setBusy(false); }
-  };
-
-  const handoff = async () => {
-    setBusy(true); setFeedback("");
-    try { setShipment(await shipmentApi.confirmHandoff(shipment!.id, { evidenceReference: handoffReference,
-      actualChargeMinor: actualCharge === "" ? undefined : Number(actualCharge), currency: "TRY" }));
-      setFeedback("Fiziksel teslim doğrulandı; kanonik dispatch tamamlandı."); }
-    catch (error: any) { setFeedback(error.message); } finally { setBusy(false); }
-  };
-
-  const cancellable = shipment && !["HANDED_OFF", "DISPATCHED", "CANCELLED"].includes(shipment.state);
-  return <div className="space-y-5 pt-4">
-    <div><p className="eyebrow">V2-13</p><h1 className="page-title">Sevkiyat & Geliver</h1>
-      <p className="mt-2 text-sm text-muted">Canlı teklif seçimi operatöre aittir. Booking, etiket ve takip stok düşmez; yalnız fiziksel teslim dispatch yapar.</p></div>
-    <section className="rounded-3xl border border-line bg-white p-5"><label className="text-xs font-black uppercase tracking-wide text-muted">Shipment ID</label>
-      <div className="mt-2 flex gap-2"><input className="field" value={shipmentId} onChange={(event) => setShipmentId(event.target.value)} placeholder="shipment:reservation-id"/>
-        <button className="primary-button" disabled={busy || !shipmentId.trim()} onClick={() => void load()}>Yükle</button></div></section>
-    {shipment && <>
-      <section className="rounded-3xl border border-line bg-white p-5">
-        <div className="flex items-center gap-3"><span className="grid size-11 place-items-center rounded-xl bg-acid text-forest"><PackageCheck/></span>
-          <div className="flex-1"><h2 className="text-xl font-black">{shipment.orderNumber}</h2><p className="text-sm text-muted">{shipment.state} · {shipment.packageCount} paket</p></div>
-          {canManage && shipment.recipient && !["CANCELLED"].includes(shipment.state) && <button className="secondary-button" disabled={busy} onClick={() => void refresh()}><RefreshCw className="size-4"/> Geliver yenile</button>}</div>
-        <div className="mt-4 grid gap-2 sm:grid-cols-2">{shipment.packages.map((pack) => <div key={pack.id} className="rounded-2xl border border-line p-3 text-sm">
-          <b>Paket {pack.packageNumber}</b><p className="text-muted">{pack.measurementSource} · {pack.dimensionsMm.length}×{pack.dimensionsMm.width}×{pack.dimensionsMm.height} mm · {pack.weightGrams} g</p>
-          <p>Booking: {pack.booking ? "hazır" : "bekliyor"} · Etiket: {pack.label ? pack.label.mediaType || "sağlayıcı formatı" : "bekliyor"}</p>
-          <p>Takip: {pack.booking?.trackingNumber || "henüz atanmadı"}</p>{pack.label && <div className="mt-3 grid grid-cols-2 gap-2"><a className="secondary-button" href={pack.label.reference} target="_blank" rel="noreferrer">Önizle</a>{canPrint && <button className="secondary-button" disabled={busy} onClick={() => void printNativeLabel(pack.id)}><Printer className="size-4"/> Yazdır</button>}</div>}</div>)}</div>
-      </section>
-      {canManage && shipment.state === "PREPARING" && shipment.packageCount === 0 && <section className="rounded-3xl border border-line bg-white p-5">
-        <h2 className="text-lg font-black">Paket ölçümleri ve içerikleri</h2><p className="mt-1 text-xs text-muted">Ölçülen değerleri paket bazında girin; içerik toplamları rezervasyonla eşleşmelidir.</p>
-        <div className="mt-4 space-y-4">{packageDrafts.map((draft, index) => <div key={index} className="rounded-2xl border border-line p-4">
-          <div className="flex items-center justify-between"><b>Paket {index + 1}</b>{packageDrafts.length > 1 && <button className="text-sm text-danger" onClick={() => setPackageDrafts((items) => items.filter((_, itemIndex) => itemIndex !== index))}>Paketi kaldır</button>}</div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-4">{(["lengthMm", "widthMm", "heightMm", "weightGrams"] as const).map((key) => <input key={key} className="field" inputMode="numeric"
-            placeholder={({ lengthMm: "Uzunluk mm", widthMm: "Genişlik mm", heightMm: "Yükseklik mm", weightGrams: "Ağırlık g" })[key]} value={draft[key]}
-            onChange={(event) => setPackageDrafts((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, [key]: event.target.value } : item))}/>)}</div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">{shipment.requiredContents.map((content) => <label key={content.productId} className="text-xs font-bold">{content.sku} · {content.title}
-            <input className="field mt-1" inputMode="numeric" value={draft.contents[content.productId] || "0"} onChange={(event) => setPackageDrafts((items) => items.map((item, itemIndex) => itemIndex === index
-              ? { ...item, contents: { ...item.contents, [content.productId]: event.target.value } } : item))}/></label>)}</div>
-        </div>)}</div>
-        <div className="mt-4 flex gap-2"><button className="secondary-button" onClick={() => setPackageDrafts((items) => [...items, defaultDraft(shipment, false)])}>Paket ekle</button>
-          <button className="primary-button" disabled={busy || packageDrafts.some((item) => !item.lengthMm || !item.widthMm || !item.heightMm || !item.weightGrams)} onClick={() => void definePackages()}>Paketleri kaydet</button></div>
-      </section>}
-      {canManage && shipment.state === "PREPARING" && shipment.packageCount > 0 && livePackages.length === 0 && <section className="rounded-3xl border border-line bg-white p-5">
-        <div className="flex items-center gap-2"><Truck/><h2 className="text-lg font-black">Geliver alıcı ve canlı teklifler</h2></div>
-        {automaticMarketplaceRecipient ? (
-          <div className="mt-4 rounded-2xl border border-line bg-canvas p-4">
-            <p className="font-black">Alıcı bilgileri Trendyol siparişinden otomatik alınacak.</p>
-            <p className="mt-1 text-xs text-muted">İl ve ilçe kodları Geliver verisinden otomatik çözümlenir; manuel adres girişi gerekmez.</p>
-          </div>
-        ) : (
-          <>
-            <p className="mt-1 text-xs text-muted">Alıcı adresi sağlayıcı gönderisine immutable snapshot olarak bağlanır. Eksik alanla gönderi oluşturulmaz.</p>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{(Object.keys(emptyRecipient) as Array<keyof typeof emptyRecipient>).map((key) => <input key={key} className="field"
-              value={recipient[key] || ""} placeholder={({ name: "Ad soyad", email: "E-posta", phone: "Telefon", address1: "Adres", address2: "Adres 2 (opsiyonel)", countryCode: "Ülke kodu",
-                cityName: "İl", cityCode: "İl kodu", districtName: "İlçe", districtID: "İlçe ID (opsiyonel)", zip: "Posta kodu (opsiyonel)" })[key]}
-              onChange={(event) => setRecipient((current) => ({ ...current, [key]: event.target.value }))}/>)}</div>
-          </>
-        )}
-        <button className="primary-button mt-4"
-          disabled={busy || (!automaticMarketplaceRecipient && (!recipient.name || !recipient.email || !recipient.address1 || !recipient.countryCode || !recipient.cityName || !recipient.cityCode || !recipient.districtName))}
-          onClick={() => void loadOffers()}>Canlı teklifleri getir</button>
-      </section>}
-      {canManage && livePackages.length > 0 && <section className="rounded-3xl border border-line bg-white p-5">
-        <div className="flex items-center justify-between"><div><h2 className="text-lg font-black">Canlı Geliver teklifleri</h2><p className="text-xs text-muted">En ucuz teklif otomatik seçilmez.</p></div>
-          <button className="secondary-button" disabled={busy} onClick={() => void refresh()}><RefreshCw className="size-4"/> Yenile</button></div>
-        <div className="mt-4 space-y-4">{livePackages.map((providerPackage, index) => <div key={providerPackage.packageId} className="rounded-2xl border border-line p-4">
-          <b>Paket {index + 1}</b><p className="text-xs text-muted">Booking: {providerPackage.bookingState || "bekliyor"} · Etiket: {providerPackage.label ? providerPackage.label.fileType || "sağlayıcı formatı" : "bekliyor"} · Takip: {providerPackage.tracking.number || "henüz atanmadı"}</p>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">{providerPackage.offers.map((offer) => <button key={offer.id} disabled={busy || Boolean(providerPackage.selectedOffer)}
-            className={`rounded-xl border p-3 text-left ${providerPackage.selectedOffer?.id === offer.id ? "border-forest bg-acid/20" : "border-line"}`}
-            onClick={() => void acceptOffer(offer.id)}><b>{offer.carrier}</b><p>{offer.service}</p><p className="font-black">{offer.amountLocal || offer.amount} {offer.currencyLocal || offer.currency}</p></button>)}</div>
-        </div>)}</div>
-      </section>}
-      {canManage && cancellable && <section className="rounded-3xl border border-danger/30 bg-white p-5"><div className="flex items-center gap-2"><XCircle className="text-danger"/><h2 className="font-black">Teslim öncesi iptal</h2></div>
-        <div className="mt-3 flex gap-2"><input className="field" value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} placeholder="İptal nedeni"/>
-          <button className="secondary-button" disabled={busy || !cancelReason.trim()} onClick={() => void cancel()}>İptal et</button></div></section>}
-      {canDispatch && shipment.state === "LABEL_READY" && <section className="rounded-3xl border border-line bg-white p-5">
-        <h2 className="text-lg font-black">Fiziksel taşıyıcı teslimi</h2><p className="mt-1 text-xs text-danger">Bu onay stok ve FIFO/COGS hareketini başlatır.</p>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2"><input className="field" value={handoffReference} onChange={(event) => setHandoffReference(event.target.value)} placeholder="Teslim kanıtı / tutanak referansı"/>
-          <input className="field" value={actualCharge} onChange={(event) => setActualCharge(event.target.value)} placeholder="Gerçek gider minor (opsiyonel)"/></div>
-        <button className="primary-button mt-4" disabled={busy || !handoffReference.trim()} onClick={() => void handoff()}>Fiziksel teslimi doğrula</button>
-      </section>}
-    </>}
-    {feedback && <p role="status" className="rounded-2xl bg-canvas p-4 text-sm font-bold">{feedback}</p>}
+function Queue() {
+  const [items,setItems] = useState<QueueItem[]>([]); const [loading,setLoading] = useState(true); const [notice,setNotice] = useState<Notice|null>(null);
+  const load = useCallback(async () => { setLoading(true); try { const summaries=(await shipmentApi.list("pending")).filter(x=>x.state==="PREPARING"); setItems(await Promise.all(summaries.map(async x=>{ try{return {...x,detail:await shipmentApi.get(x.id)}}catch{return x}}))); } catch(e){setNotice(fail(e))} finally{setLoading(false)} },[]);
+  useEffect(()=>{void load()},[load]);
+  const total=items.reduce((sum,x)=>sum+(x.detail?.requiredContents.reduce((n,l)=>n+l.quantityBaseInt,0)||0),0);
+  return <div className="fulfillment-page"><Header title="Paketleme"/><section className="fulfillment-hero"><div><span>PAKETLEME KUYRUĞU</span><strong>{items.length}</strong><p>Toplaması tamamlanan sipariş</p></div><PackageCheck/></section>
+    <div className="fulfillment-summary"><span>{items.length} sipariş</span><span>{total} adet</span><Link to="/shipments?view=dispatch">Sevke hazırları aç</Link></div><Alert value={notice}/>
+    {loading ? <div className="fulfillment-empty"><RefreshCw className="animate-spin"/>Kuyruk yükleniyor…</div> : items.length ? <div className="fulfillment-list">{items.map(item=>{const qty=item.detail?.requiredContents.reduce((n,l)=>n+l.quantityBaseInt,0)||0;return <article className="fulfillment-order-card" key={item.id}><div className="fulfillment-card-top"><span className="platform-pill">{item.sourceChannel}</span><span className="status-pill warning">{statusText[item.state]}</span></div><h2>{item.orderNumber}</h2><p className="customer-name">{item.customerName||"Müşteri bilgisi yok"}</p><dl><div><dt>İçerik</dt><dd>{item.detail?.requiredContents.length||0} ürün · {qty} adet</dd></div><div><dt>Ağırlık</dt><dd>Paketlemede ölçülecek</dd></div></dl><Link className="fulfillment-primary" to={`/shipments?shipmentId=${encodeURIComponent(item.id)}`}>Paketlemeyi Başlat <ChevronRight size={18}/></Link></article>})}</div> : <div className="fulfillment-empty"><CheckCircle2/>Paketleme bekleyen sipariş yok.</div>}
   </div>;
 }
+
+function Setup({ shipment,onSaved,busy,setBusy,setNotice }: { shipment:ShipmentV1;onSaved:(s:ShipmentV1)=>void;busy:boolean;setBusy:(b:boolean)=>void;setNotice:(n:Notice|null)=>void }) {
+  const make=(all:boolean):Draft=>({template:"",length:"",width:"",height:"",weight:"",contents:Object.fromEntries(shipment.requiredContents.map(x=>[x.productId,all?String(x.quantityBaseInt):"0"]))});
+  const [drafts,setDrafts]=useState<Draft[]>(()=>[make(true)]); const op=useRef(key());
+  const update=(i:number,k:keyof Draft,v:string)=>setDrafts(xs=>xs.map((x,j)=>j===i?{...x,[k]:v}:x));
+  const choose=(i:number,name:string,size?:readonly number[])=>setDrafts(xs=>xs.map((x,j)=>j===i?{...x,template:name,...(size?{length:String(size[0]),width:String(size[1]),height:String(size[2])}:{})}:x));
+  const valid=drafts.every(x=>Number(x.length)>0&&Number(x.width)>0&&Number(x.height)>0&&Number(x.weight)>0);
+  const save=async()=>{setBusy(true);setNotice(null);try{await shipmentApi.definePackages(shipment.id,drafts.map((x,i)=>({packageNumber:i+1,measured:{lengthMm:Math.round(Number(x.length)*10),widthMm:Math.round(Number(x.width)*10),heightMm:Math.round(Number(x.height)*10),weightGrams:Number(x.weight)},contents:shipment.requiredContents.map(l=>({productId:l.productId,quantityBaseInt:Number(x.contents[l.productId]||0)})).filter(l=>l.quantityBaseInt>0)})),op.current);onSaved(await shipmentApi.get(shipment.id));setNotice({kind:"success",message:"Paket ölçüleri ve içerikleri kesinleştirildi."})}catch(e){setNotice(fail(e))}finally{setBusy(false)}};
+  return <><section className="fulfillment-order-summary"><span className="platform-pill">{shipment.sourceChannel}</span><h2>{shipment.orderNumber}</h2><p>{shipment.requiredContents.length} ürün · {shipment.requiredContents.reduce((n,x)=>n+x.quantityBaseInt,0)} adet</p></section>
+    <section className="fulfillment-card"><h3>Sipariş içeriği</h3>{shipment.requiredContents.map(x=><div className="content-line" key={x.productId}><span className="content-icon"><Box size={22}/></span><span><strong>{x.title}</strong><small>{x.sku}</small></span><b>{x.quantityBaseInt}×</b></div>)}</section>
+    {drafts.map((d,i)=><section className="fulfillment-card package-draft" key={i}><div className="section-heading"><div><span>PAKET {i+1}</span><h3>Koli ve ölçüler</h3></div>{drafts.length>1&&<button onClick={()=>setDrafts(xs=>xs.filter((_,j)=>j!==i))}>Kaldır</button>}</div><div className="box-template-grid">{boxes.map(b=><button aria-pressed={d.template===b.name} className={d.template===b.name?"selected":""} onClick={()=>choose(i,b.name,b.size)} key={b.name}><strong>{b.name}</strong><small>{b.size.join("×")} cm</small></button>)}<button aria-pressed={d.template==="Özel"} className={d.template==="Özel"?"selected":""} onClick={()=>choose(i,"Özel")}><strong>Özel ölçü</strong><small>Manuel girin</small></button></div><div className="dimension-grid"><label>Uzunluk (cm)<input inputMode="decimal" value={d.length} onChange={e=>update(i,"length",e.target.value)}/></label><label>Genişlik (cm)<input inputMode="decimal" value={d.width} onChange={e=>update(i,"width",e.target.value)}/></label><label>Yükseklik (cm)<input inputMode="decimal" value={d.height} onChange={e=>update(i,"height",e.target.value)}/></label></div><label className="weight-field">Ağırlık (gram)<input inputMode="numeric" value={d.weight} onChange={e=>update(i,"weight",e.target.value)} placeholder="Örn. 1850"/></label><details><summary>Bu paketteki ürünleri düzenle</summary>{shipment.requiredContents.map(l=><label className="package-content-input" key={l.productId}>{l.sku}<input inputMode="numeric" value={d.contents[l.productId]||"0"} onChange={e=>setDrafts(xs=>xs.map((x,j)=>j===i?{...x,contents:{...x.contents,[l.productId]:e.target.value}}:x))}/></label>)}</details></section>)}
+    <button className="fulfillment-secondary" onClick={()=>setDrafts(xs=>[...xs,make(false)])}><Plus size={18}/> Paket ekle</button><button className="fulfillment-primary" disabled={busy||!valid} onClick={()=>void save()}>Paketleri Kaydet ve Devam Et <ChevronRight size={18}/></button></>;
+}
+
+function Offers({ shipment,onSaved,busy,setBusy,setNotice }: { shipment:ShipmentV1;onSaved:(s:ShipmentV1)=>void;busy:boolean;setBusy:(b:boolean)=>void;setNotice:(n:Notice|null)=>void }) {
+  const automatic=shipment.sourceChannel.toUpperCase()==="TRENDYOL"; const [recipient,setRecipient]=useState({...emptyRecipient,...(shipment.recipient||{}),phone:shipment.recipient?.phone||"",address2:shipment.recipient?.address2||"",districtID:shipment.recipient?.districtID||"",zip:shipment.recipient?.zip||""}); const [live,setLive]=useState<GeliverLivePackage[]>([]); const [loaded,setLoaded]=useState(false); const [selected,setSelected]=useState<Record<string,string>>({}); const loadOp=useRef(key()); const buyOps=useRef(new Map<string,string>());
+  const load=async(refresh=false)=>{setBusy(true);setNotice(null);try{const data=refresh?await shipmentApi.refreshGeliver(shipment.id):await shipmentApi.loadGeliverOffers(shipment.id,automatic?undefined:recipient,loadOp.current);setLive(data);setLoaded(true);setNotice({kind:data.some(x=>x.offers.length)?"success":"info",message:data.some(x=>x.offers.length)?"Canlı Geliver teklifleri güncellendi.":"Teklif henüz hazır değil; biraz sonra yenileyin."})}catch(e){setNotice(fail(e))}finally{setBusy(false)}};
+  useEffect(()=>{if(shipment.state!=="PREPARING")void load(true)},[]);
+  const active=live.find(x=>!x.selectedOffer)||live[0]; const offer=active?.offers.find(x=>x.id===selected[active.packageId]);
+  const buy=async()=>{if(!offer||!active)return;setBusy(true);const mapKey=`${shipment.id}:${offer.id}`;if(!buyOps.current.has(mapKey))buyOps.current.set(mapKey,key());try{const updated=await shipmentApi.acceptGeliverOffer(shipment.id,offer.id,buyOps.current.get(mapKey)!);onSaved(updated);setLive(await shipmentApi.refreshGeliver(shipment.id));setSelected({});setNotice({kind:"success",message:updated.state==="LABEL_READY"?"Gönderi, takip numarası ve etiket hazır.":"Paket gönderisi oluşturuldu; sıradaki paketi seçin."})}catch(e){setNotice(fail(e))}finally{setBusy(false)}};
+  if(!loaded)return <section className="fulfillment-card"><div className="section-heading"><div><span>GELİVER</span><h3>Canlı kargo teklifleri</h3></div><Truck/></div><div className="package-measure-summary">{shipment.packages.map(p=><p key={p.id}><strong>Paket {p.packageNumber}</strong><span>{p.dimensionsMm.length/10}×{p.dimensionsMm.width/10}×{p.dimensionsMm.height/10} cm · {(p.weightGrams/1000).toLocaleString("tr-TR")} kg</span></p>)}</div>{automatic?<p className="info-box">Alıcı bilgileri Trendyol siparişinden otomatik alınacak.</p>:<details className="recipient-details" open={!shipment.recipient}><summary>Alıcı adresi</summary><div className="recipient-grid">{(Object.keys(emptyRecipient) as Array<keyof typeof emptyRecipient>).map(k=><label key={k}>{k}<input value={recipient[k]||""} onChange={e=>setRecipient(x=>({...x,[k]:e.target.value}))}/></label>)}</div></details>}<button className="fulfillment-primary" disabled={busy||(!automatic&&(!recipient.name||!recipient.email||!recipient.address1||!recipient.cityName||!recipient.cityCode||!recipient.districtName))} onClick={()=>void load()}>Geliver Kargo Tekliflerini Getir</button></section>;
+  return <section className="fulfillment-card offers-card"><div className="section-heading"><div><span>CANLI FİYATLAR</span><h3>Geliver teklifleri</h3></div><button aria-label="Teklifleri yenile" onClick={()=>void load(true)}><RefreshCw size={18}/></button></div><p className="helper-copy">En ucuz teklif otomatik seçilmez.</p><div className="offer-list">{active?.offers.map(o=><button className={selected[active.packageId]===o.id?"selected":""} onClick={()=>setSelected(x=>({...x,[active.packageId]:o.id}))} key={o.id}><span className="offer-radio">{selected[active.packageId]===o.id&&<Check size={14}/>}</span><span><strong>{o.carrier}</strong><small>{o.service}{o.durationTerms?` · ${o.durationTerms}`:""}</small>{o.estimatedArrivalAt&&<small>Tahmini: {new Date(o.estimatedArrivalAt).toLocaleDateString("tr-TR")}</small>}</span><b>{price(o.amountLocal||o.amount,o.currencyLocal||o.currency)}</b></button>)}</div>{!active?.offers.length&&<div className="fulfillment-empty compact">Teklif bulunamadı.</div>}<button className="fulfillment-primary" disabled={busy||!offer} onClick={()=>void buy()}>{offer?`${offer.carrier} Teklifini Satın Al · ${price(offer.amountLocal||offer.amount,offer.currencyLocal||offer.currency)}`:"Satın almak için teklif seçin"}</button></section>;
+}
+
+function Label({ shipment,busy,setBusy,setNotice }: {shipment:ShipmentV1;busy:boolean;setBusy:(b:boolean)=>void;setNotice:(n:Notice|null)=>void}) {
+  const [packageId,setPackageId]=useState(shipment.packages.find(x=>x.label)?.id||shipment.packages[0]?.id||""); const [jobs,setJobs]=useState<PrintJob[]>([]); const [modal,setModal]=useState<PrintJob|null>(null); const [reason,setReason]=useState<ReprintReason|"">(""); const [explanation,setExplanation]=useState(""); const ops=useRef(new Map<string,string>()); const pack=shipment.packages.find(x=>x.id===packageId)||shipment.packages[0];
+  useEffect(()=>{warehouseAdminApi.listPrintJobs().then(x=>setJobs(x.filter(j=>j.purpose==="SHIPPING"))).catch(()=>undefined)},[]); if(!pack)return null; const job=shippingPrintJobFor(jobs,pack);
+  const print=async()=>{setBusy(true);if(!ops.current.has(pack.id))ops.current.set(pack.id,key());try{const created=await shipmentApi.queueNativeLabel(shipment.id,pack.id,ops.current.get(pack.id)!);setJobs(x=>[created,...x.filter(j=>j.id!==created.id)]);setNotice({kind:"success",message:"Sağlayıcı etiketi yazıcı kuyruğuna alındı; fiziksel baskı ayrı izlenir."})}catch(e){setNotice(fail(e))}finally{setBusy(false)}};
+  const reprint=async()=>{if(!modal||!reason)return;setBusy(true);try{const created=await warehouseAdminApi.reprint(modal.id,reason,explanation||undefined);setJobs(x=>[created,...x]);setModal(null);setNotice({kind:"success",message:"Yeniden baskı nedeni ile kuyruğa alındı; yeni gönderi satın alınmadı."})}catch(e){setNotice(fail(e))}finally{setBusy(false)}};
+  return <><section className="label-safety"><PackageCheck/><span><strong>Bu etiketi doğru pakete yapıştırın</strong><small>{packageName(shipment,pack)}</small></span></section>{shipment.packages.length>1&&<div className="package-tabs">{shipment.packages.map(p=><button className={p.id===pack.id?"selected":""} onClick={()=>setPackageId(p.id)} key={p.id}>Paket {p.packageNumber}</button>)}</div>}<section className="fulfillment-card label-metadata"><div><span>Sipariş</span><strong>{shipment.orderNumber}</strong></div><div><span>Kargo</span><strong>{packageCarrierName(pack)}</strong></div><div><span>Takip no</span><strong>{pack.booking?.trackingNumber||"Hazırlanıyor"}</strong></div><div><span>Ölçü / ağırlık</span><strong>{pack.dimensionsMm.length/10}×{pack.dimensionsMm.width/10}×{pack.dimensionsMm.height/10} cm · {(pack.weightGrams/1000).toLocaleString("tr-TR")} kg</strong></div></section><section className="fulfillment-card label-preview"><div className="section-heading"><div><span>100×150 MM</span><h3>Kargo etiketi</h3></div><span className="status-pill ready">HAZIR</span></div>{pack.label?.reference?<iframe title="Kargo etiketi önizleme" src={pack.label.responsiveReference||pack.label.reference}/>:<div className="fulfillment-empty compact">Etiket sağlayıcıdan bekleniyor.</div>}<p className={`printer-status ${job?"":"pending"}`}>{job?<CheckCircle2 size={16}/>:<CircleAlert size={16}/>} {job?`Yazıcı işi: ${job.status}`:"Henüz yazıcı kuyruğuna alınmadı"}</p><button className="fulfillment-primary" disabled={busy||!pack.label} onClick={()=>void print()}><Printer size={18}/>Etiketi Yazdır</button>{job&&<button className="fulfillment-secondary" onClick={()=>setModal(job)}><RotateCcw size={17}/>Neden belirterek yeniden yazdır</button>}</section><Link className="fulfillment-primary dark" to="/shipments?view=dispatch">Sevke Hazır Paketlere Git <ChevronRight size={18}/></Link>{modal&&<div className="fulfillment-modal-layer"><section className="fulfillment-modal" role="dialog" aria-modal="true" aria-labelledby="reprint-title"><button className="modal-close" aria-label="Kapat" onClick={()=>setModal(null)}><X/></button><h2 id="reprint-title">Yeniden baskı nedeni</h2><p>Orijinal provider etiketi kullanılır.</p><select value={reason} onChange={e=>setReason(e.target.value as ReprintReason|"")}><option value="">Neden seçin</option><option value="DAMAGED_OUTPUT">Hasarlı çıktı</option><option value="LOST">Kayıp</option><option value="PRINTER_ERROR">Yazıcı hatası</option><option value="OTHER">Diğer</option></select>{reason==="OTHER"&&<textarea value={explanation} onChange={e=>setExplanation(e.target.value)} placeholder="Açıklama"/>}<button className="fulfillment-primary" disabled={!reason||(reason==="OTHER"&&!explanation.trim())} onClick={()=>void reprint()}>Yeniden Yazdır</button></section></div>}</>;
+}
+
+function CancelAction({ shipment, onSaved, busy, setBusy, setNotice }: { shipment:ShipmentV1;onSaved:(s:ShipmentV1)=>void;busy:boolean;setBusy:(b:boolean)=>void;setNotice:(n:Notice|null)=>void }) {
+  const [reason,setReason]=useState("");
+  if (["HANDED_OFF","DISPATCHED","CANCELLED"].includes(shipment.state)) return null;
+  const cancel=async()=>{setBusy(true);try{onSaved(await shipmentApi.cancel(shipment.id,reason.trim()));setNotice({kind:"success",message:"Sevkiyat fiziksel teslimden önce iptal edildi."})}catch(e){setNotice(fail(e))}finally{setBusy(false)}};
+  return <details className="fulfillment-card"><summary className="helper-copy">Teslim öncesi iptal</summary><label className="weight-field">İptal nedeni<input value={reason} onChange={e=>setReason(e.target.value)}/></label><button className="fulfillment-secondary" disabled={busy||!reason.trim()} onClick={()=>void cancel()}>{preservedActionLabels[0]}</button></details>;
+}
+
+function Flow({ id }:{id:string}) { const {user}=useAuth();const [shipment,setShipment]=useState<ShipmentV1|null>(null);const [busy,setBusy]=useState(true);const [notice,setNotice]=useState<Notice|null>(null);useEffect(()=>{shipmentApi.get(id).then(setShipment).catch(e=>setNotice(fail(e))).finally(()=>setBusy(false))},[id]);const allowed=hasWarehousePermission(user,"shipping:manage");return <div className="fulfillment-page"><Header title={shipment?.state==="LABEL_READY"?"Kargo Etiketi":shipment?.packageCount?"Geliver Teklifleri":"Paket Hazırlama"} back="/shipments"/><Alert value={notice}/>{busy&&!shipment&&<div className="fulfillment-empty"><RefreshCw className="animate-spin"/>Sipariş yükleniyor…</div>}{shipment&&!allowed&&<div className="fulfillment-empty"><CircleAlert/>shipping:manage yetkisi gerekli.</div>}{shipment&&allowed&&shipment.state==="PREPARING"&&shipment.packageCount===0&&<Setup shipment={shipment} onSaved={setShipment} busy={busy} setBusy={setBusy} setNotice={setNotice}/>} {shipment&&allowed&&shipment.state!=="LABEL_READY"&&shipment.packageCount>0&&<Offers shipment={shipment} onSaved={setShipment} busy={busy} setBusy={setBusy} setNotice={setNotice}/>} {shipment&&allowed&&shipment.state==="LABEL_READY"&&<Label shipment={shipment} busy={busy} setBusy={setBusy} setNotice={setNotice}/>} {shipment&&allowed&&<CancelAction shipment={shipment} onSaved={setShipment} busy={busy} setBusy={setBusy} setNotice={setNotice}/>}{shipment&&["HANDED_OFF","DISPATCHED"].includes(shipment.state)&&<div className="dispatch-success"><CheckCircle2/><h2>Sevk edildi</h2><p>{shipment.orderNumber}</p></div>}</div> }
+
+function Ready() {
+  const {user}=useAuth();const [items,setItems]=useState<QueueItem[]>([]);const [selected,setSelected]=useState<string[]>([]);const [notice,setNotice]=useState<Notice|null>(null);const [loading,setLoading]=useState(true);const [open,setOpen]=useState(false);const [evidence,setEvidence]=useState("");const [result,setResult]=useState<BulkHandoffResult|null>(null);const op=useRef(key());const canDispatch=hasWarehousePermission(user,"shipping:dispatch");
+  useEffect(()=>{shipmentApi.list("pending").then(xs=>Promise.all(xs.filter(x=>x.state==="LABEL_READY").map(async x=>({...x,detail:await shipmentApi.get(x.id)})))).then(setItems).catch(e=>setNotice(fail(e))).finally(()=>setLoading(false))},[]);
+  const send=async()=>{setLoading(true);try{const r=await shipmentApi.bulkHandoff(selected,evidence,op.current);setResult(r);setOpen(false);setItems(xs=>xs.filter(x=>!r.data.some(y=>y.shipmentId===x.id&&y.success)));setSelected([])}catch(e){setNotice(fail(e))}finally{setLoading(false)}};
+  if(result)return <div className="fulfillment-page"><Header title="Sevkiyat" back="/shipments"/><section className="dispatch-success"><CheckCircle2/><span>TOPLU SEVK TAMAMLANDI</span><h2>{result.summary.dispatched} gönderi sevk edildi</h2><p>{result.summary.failed?`${result.summary.failed} kayıt başarısız; bu kayıtların stok hareketi yapılmadı.`:"Fiziksel taşıyıcı teslimi doğrulandı."}</p><dl><div><dt>İşlem no</dt><dd>{result.batchOperationId.slice(0,13)}</dd></div><div><dt>Zaman</dt><dd>{new Date().toLocaleString("tr-TR")}</dd></div><div><dt>Operatör</dt><dd>{user?.username||"Operatör"}</dd></div></dl></section><button className="fulfillment-primary" onClick={()=>setResult(null)}>Listeye Dön</button></div>;
+  return <div className="fulfillment-page"><Header title="Sevke Hazır" back="/shipments"/><section className="fulfillment-hero ready"><div><span>SEVKE HAZIR</span><strong>{items.length}</strong><p>Fiziksel taşıyıcı teslimi bekliyor</p></div><Truck/></section><Alert value={notice}/>{items.length>0&&<label className="select-all"><input type="checkbox" checked={selected.length===items.length} onChange={e=>setSelected(e.target.checked?items.map(x=>x.id):[])}/> Tümünü seç <span>{selected.length} seçili</span></label>}{loading&&!items.length?<div className="fulfillment-empty"><RefreshCw className="animate-spin"/>Liste yükleniyor…</div>:<div className="fulfillment-list">{items.map(item=><article className={`ready-card ${selected.includes(item.id)?"selected":""}`} key={item.id}><label><input type="checkbox" checked={selected.includes(item.id)} onChange={e=>setSelected(xs=>e.target.checked?[...xs,item.id]:xs.filter(x=>x!==item.id))}/><span><strong>{item.orderNumber}</strong><small>{item.sourceChannel} · {item.customerName||"Müşteri"}</small></span><span className="status-pill ready">SEVKE HAZIR</span></label>{item.detail?.packages.map(p=><div className="ready-package" key={p.id}><span>{packageName(item.detail!,p)}</span><strong>{packageCarrierName(p)}</strong><small>{p.booking?.trackingNumber||"Takip no bekleniyor"}</small><Link to={`/shipments?shipmentId=${item.id}`}>Etiketi aç</Link></div>)}</article>)}</div>}{canDispatch&&<button className="fulfillment-primary sticky-action" disabled={!selected.length} onClick={()=>{op.current=key();setOpen(true)}}>{selected.length?`${selected.length} Gönderiyi Toplu Sevk Et`:"Sevk için paket seçin"}</button>}{open&&<div className="fulfillment-modal-layer"><section className="fulfillment-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><button className="modal-close" aria-label="Kapat" onClick={()=>setOpen(false)}><X/></button><div className="modal-truck"><Truck/></div><h2 id="confirm-title">{selected.length} gönderiyi kargoya teslim ettiniz mi?</h2><p>Bu onay stok ve FIFO/COGS hareketini başlatır; geri alınamaz.</p><label>Teslim kanıtı / tutanak referansı<input value={evidence} onChange={e=>setEvidence(e.target.value)} placeholder="Örn. dock-7 / tutanak-184"/></label><div className="modal-actions"><button className="fulfillment-secondary" onClick={()=>setOpen(false)}>Vazgeç</button><button className="fulfillment-primary" disabled={!evidence.trim()} onClick={()=>void send()}>{preservedActionLabels[1]}</button></div></section></div>}</div>;
+}
+
+export default function ShipmentPage(){const [params]=useSearchParams();const id=params.get("shipmentId");if(id)return <Flow id={id}/>;if(params.get("view")==="dispatch")return <Ready/>;return <Queue/>}

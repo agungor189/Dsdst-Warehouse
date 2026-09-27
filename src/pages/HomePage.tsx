@@ -25,9 +25,9 @@ type QuickAction = {
 const quickActions: QuickAction[] = [
   { label: "Toplama", description: "Sipariş topla", to: "/orders", icon: Check, tone: "cobalt", permission: "warehouse:pick_orders" },
   { label: "Paketleme", description: "Paket hazırla", to: "/shipments", icon: PackageCheck, tone: "teal", permission: "shipping:manage" },
-  { label: "Sevkiyat", description: "Sevke hazırla", to: "/shipments", icon: Send, tone: "purple", permission: "shipping:manage" },
+  { label: "Sevkiyat", description: "Sevke hazırla", to: "/shipments?view=dispatch", icon: Send, tone: "purple", permission: "shipping:manage" },
   { label: "İade", description: "Ürün kabul", to: "/returns", icon: RotateCcw, tone: "danger", permission: "warehouse:accept_returns" },
-  { label: "Yükleme Alanı", description: "Handoff / yükleme", to: "/shipments", icon: Truck, tone: "warning", permission: "shipping:dispatch" },
+  { label: "Yükleme Alanı", description: "Handoff / yükleme", to: "/shipments?view=dispatch", icon: Truck, tone: "warning", permission: "shipping:dispatch" },
 ];
 
 const operationMetrics = ["Paketlenecek", "Sevke hazır", "İade", "Yükleme"];

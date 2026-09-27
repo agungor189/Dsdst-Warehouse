@@ -26,6 +26,20 @@ export type WarehousePermission =
 
 export type ShipmentState = "PREPARING" | "CARRIER_SELECTED" | "BOOKED" | "LABEL_READY" | "HANDED_OFF" | "DISPATCHED" | "CANCELLED" | "EXCEPTION";
 
+export interface ShipmentListItem {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  sourceChannel: string;
+  reservationId: string;
+  state: ShipmentState;
+  packageCount: number;
+  customerName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  activeDiagnostic?: { code?: string; message?: string } | null;
+}
+
 export interface ShipmentV1 {
   id: string;
   orderId: string;
@@ -71,6 +85,13 @@ export interface GeliverLivePackage {
     amountLocal: string | null; currencyLocal: string | null; estimatedArrivalAt: string | null; durationTerms: string | null }>;
   tracking: { number: string | null; url: string | null; stateCode: string | null };
   label: null | { url: string; responsiveUrl: string | null; fileType: string | null; artifactSha256: string | null };
+}
+
+export interface BulkHandoffResult {
+  batchOperationId: string;
+  data: Array<{ shipmentId: string; orderNumber: string | null; success: boolean; resultingState: ShipmentState | null;
+    replayed?: boolean; errorCode?: string; message?: string }>;
+  summary: { requested: number; dispatched: number; failed: number; alreadyProcessed: number };
 }
 
 export interface WarehouseLayoutObject {

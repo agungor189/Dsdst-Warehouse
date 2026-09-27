@@ -61,6 +61,16 @@ describe("ScanInput kamera taraması", () => {
     expect(screen.getByLabelText("Lokasyon / Barkod / SKU okutun")).not.toHaveFocus();
   });
 
+  it("başarılı manuel Enter taramasından sonra inputu temizler ve blur eder", async () => {
+    const user = userEvent.setup();
+    render(<ScanInput onScan={vi.fn().mockResolvedValue(true)} busy={false}/>);
+    const input = screen.getByLabelText("Lokasyon / Barkod / SKU okutun");
+    await user.click(input);
+    await user.type(input, "SKU-42{Enter}");
+    await waitFor(() => expect(input).toHaveValue(""));
+    expect(input).not.toHaveFocus();
+  });
+
   it("kameradan okunan lokasyon veya SKU değerini mevcut doğrulamaya gönderir", async () => {
     const onScan = vi.fn().mockResolvedValue(true);
     const user = userEvent.setup();

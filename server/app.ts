@@ -472,6 +472,15 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
       message: "Stok çıkışı yalnız doğrulanmış fiziksel taşıyıcı teslimiyle yapılabilir." } }));
   app.get("/api/shipping/v1/provider-contracts/geliver", requireSession, (req, res) =>
     forward(req, res, "GET", "/shipping/provider-contracts/geliver"));
+  app.get("/api/shipping/v1/shipments", requireSession, (req, res) => {
+    const query = new URLSearchParams();
+    const requestedScope = safeQueryText(req.query.scope, 20).toLowerCase();
+    query.set("scope", ["pending", "completed", "all"].includes(requestedScope) ? requestedScope : "pending");
+    const search = safeQueryText(req.query.q, 120);
+    if (search) query.set("q", search);
+    query.set("limit", String(safePositiveInteger(req.query.limit, 200, 500)));
+    return forward(req, res, "GET", "/shipping/shipments", query);
+  });
   app.get("/api/shipping/v1/shipments/:id", requireSession, (req, res) =>
     forward(req, res, "GET", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}`));
   app.get("/api/shipping/v1/reservations/:id/shipment", requireSession, (req, res) =>
@@ -561,6 +570,18 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     forward(req, res, "POST", `/shipping/shipments/${encodeURIComponent(String(req.params.id))}/cancel`, undefined, {
       reason: safeQueryText(req.body?.reason, 500),
       cancelledAt: safeQueryText(req.body?.cancelledAt, 50) || null,
+      idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
+  app.post("/api/shipping/v1/shipments/bulk-handoff", requireSession, (req, res) =>
+    forward(req, res, "POST", "/shipping/shipments/bulk-handoff", undefined, {
+      shipmentIds: Array.isArray(req.body?.shipmentIds)
+        ? req.body.shipmentIds.slice(0, 50).map((value: unknown) => safeQueryText(value, 500)).filter(Boolean)
+        : [],
+      handedOffAt: safeQueryText(req.body?.handedOffAt, 50),
+      handoffEvidence: {
+        kind: safeQueryText(req.body?.handoffEvidence?.kind, 100),
+        reference: safeQueryText(req.body?.handoffEvidence?.reference, 500),
+      },
       idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
     }));
   app.post("/api/shipping/v1/shipments/:id/handoff", requireSession, (req, res) =>

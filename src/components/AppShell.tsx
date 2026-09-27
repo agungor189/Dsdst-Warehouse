@@ -45,9 +45,9 @@ const drawerGroups: Array<{ title: string; items: NavItem[] }> = [
   { title: "OPERASYON", items: [
     { label: "Toplama", description: "Picking kuyruğu", to: "/orders", icon: Check, tone: "cobalt", permission: "warehouse:pick_orders" },
     { label: "Paketleme", description: "Paket hazırlama", to: "/shipments", icon: PackageCheck, tone: "teal", permission: "shipping:manage" },
-    { label: "Sevkiyat", description: "Kargo ve handoff", to: "/shipments", icon: Send, tone: "purple", permission: "shipping:manage" },
+    { label: "Sevkiyat", description: "Kargo ve handoff", to: "/shipments?view=dispatch", icon: Send, tone: "purple", permission: "shipping:manage" },
     { label: "İade", description: "İade ve kalite", to: "/returns", icon: RotateCcw, tone: "danger", permission: "warehouse:accept_returns" },
-    { label: "Yükleme Alanı", description: "Yükleme / handoff", to: "/shipments", icon: Truck, tone: "warning", permission: "shipping:dispatch" },
+    { label: "Yükleme Alanı", description: "Yükleme / handoff", to: "/shipments?view=dispatch", icon: Truck, tone: "warning", permission: "shipping:dispatch" },
   ] },
   { title: "DEPO", items: [
     { label: "Ürün Taşıma", description: "Paket lokasyonu", to: "/admin/move", icon: ArrowDownUp, permission: "warehouse:move_stock" },

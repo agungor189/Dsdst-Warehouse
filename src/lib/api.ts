@@ -26,7 +26,7 @@ import type {
   InventoryReservationV1,
   WarehouseExecutionPackage,
   WarehouseExecutionLocation,
-  ShipmentV1, GeliverLivePackage,
+  ShipmentV1, GeliverLivePackage, ShipmentListItem, BulkHandoffResult,
 } from "../types/warehouse";
 import type { ReceivingLot, ReceivingSession } from "../types/warehouse";
 import { reportApiResponse, reportApiUnavailable } from "./apiStatus";
@@ -120,7 +120,7 @@ export type LabelTemplatePurpose = "goods_receipt" | "location";
 export type ReprintReason = "DAMAGED_OUTPUT" | "LOST" | "PRINTER_ERROR" | "OTHER";
 export type PrintJob = Record<string, unknown> & {
   id: string; purpose: "GOODS_RECEIPT_PACKAGE" | "LOCATION" | "SHIPPING";
-  subject_code: string; status: "QUEUED" | "RENDERED" | "SUBMITTED" | "ACKNOWLEDGED" | "PRINTED_CONFIRMED" | "DELIVERY_UNKNOWN" | "FAILED" | "CANCELLED";
+  subject_id?: string; subject_code: string; status: "QUEUED" | "RENDERED" | "SUBMITTED" | "ACKNOWLEDGED" | "PRINTED_CONFIRMED" | "DELIVERY_UNKNOWN" | "FAILED" | "CANCELLED";
   attempts: Array<Record<string, unknown>>; history: Array<Record<string, unknown>>;
 };
 
@@ -204,7 +204,7 @@ export const catalogApi = {
   },
 };
 
-const inventoryOperation = () => crypto.randomUUID();
+const inventoryOperation = (): string => crypto.randomUUID();
 
 export const inventoryApi = {
   async getAvailability(productId: string) {
@@ -249,15 +249,20 @@ export const reconciliationApi = {
 };
 
 export const shipmentApi = {
+  async list(scope: "pending" | "completed" | "all" = "pending", query = "", limit = 200) {
+    const params = new URLSearchParams({ scope, limit: String(limit) });
+    if (query.trim()) params.set("q", query.trim());
+    return (await request<ShipmentListItem[]>(`/shipping/v1/shipments?${params}`)).data;
+  },
   async get(shipmentId: string) {
     return (await request<ShipmentV1>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}`)).data;
   },
   async getForReservation(reservationId: string) {
     return (await request<ShipmentV1>(`/shipping/v1/reservations/${encodeURIComponent(reservationId)}/shipment`)).data;
   },
-  async definePackages(shipmentId: string, packages: Array<Record<string, unknown>>) {
+  async definePackages(shipmentId: string, packages: Array<Record<string, unknown>>, operationId = inventoryOperation()) {
     return (await request<ShipmentV1["packages"]>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/packages`, {
-      method: "POST", body: JSON.stringify({ packages, idempotency_key: inventoryOperation() }),
+      method: "POST", body: JSON.stringify({ packages, idempotency_key: operationId }),
     })).data;
   },
   async selectCarrier(shipmentId: string, input: { carrierCode: string; serviceCode: string; quoteId: string; quoteAmountMinor: number; currency: string; quoteReference: string }) {
@@ -273,12 +278,12 @@ export const shipmentApi = {
     })).data;
   },
   async loadGeliverOffers(shipmentId: string, recipient?: { name: string; email: string; phone?: string; address1: string;
-    address2?: string; countryCode: string; cityName: string; cityCode: string; districtName: string; districtID?: string; zip?: string }) {
+    address2?: string; countryCode: string; cityName: string; cityCode: string; districtName: string; districtID?: string; zip?: string }, operationId = inventoryOperation()) {
     return (await request<GeliverLivePackage[]>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/geliver/offers`, {
       method: "POST",
       body: JSON.stringify({
         ...(recipient ? { recipient } : {}),
-        idempotency_key: inventoryOperation(),
+        idempotency_key: operationId,
       }),
     })).data;
   },
@@ -287,14 +292,14 @@ export const shipmentApi = {
       method: "POST", body: JSON.stringify({ idempotency_key: inventoryOperation() }),
     })).data;
   },
-  async acceptGeliverOffer(shipmentId: string, offerId: string) {
+  async acceptGeliverOffer(shipmentId: string, offerId: string, operationId = inventoryOperation()) {
     return (await request<ShipmentV1>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/geliver/offers/${encodeURIComponent(offerId)}/accept`, {
-      method: "POST", body: JSON.stringify({ idempotency_key: inventoryOperation() }),
+      method: "POST", body: JSON.stringify({ idempotency_key: operationId }),
     })).data;
   },
-  async queueNativeLabel(shipmentId: string, packageId: string) {
+  async queueNativeLabel(shipmentId: string, packageId: string, operationId = inventoryOperation()) {
     return (await request<PrintJob>(`/shipping/v1/shipments/${encodeURIComponent(shipmentId)}/packages/${encodeURIComponent(packageId)}/print`, {
-      method: "POST", body: JSON.stringify({ idempotency_key: inventoryOperation() }),
+      method: "POST", body: JSON.stringify({ idempotency_key: operationId }),
     })).data;
   },
   async cancel(shipmentId: string, reason: string) {
@@ -310,6 +315,15 @@ export const shipmentApi = {
           currency: input.currency || "TRY", provenance: { source: "GELIVER_ACTUAL_CHARGE", reference: input.chargeReference || input.evidenceReference } } }),
         idempotency_key: inventoryOperation() }),
     })).data;
+  },
+  async bulkHandoff(shipmentIds: string[], evidenceReference: string, operationId: string) {
+    const response = await request<BulkHandoffResult["data"]>("/shipping/v1/shipments/bulk-handoff", {
+      method: "POST",
+      body: JSON.stringify({ shipmentIds, handedOffAt: new Date().toISOString(),
+        handoffEvidence: { kind: "OPERATOR_CARRIER_HANDOFF", reference: evidenceReference }, idempotency_key: operationId }),
+    });
+    return { batchOperationId: operationId, data: response.data,
+      summary: (response as unknown as { summary: BulkHandoffResult["summary"] }).summary } as BulkHandoffResult;
   },
 };
 
