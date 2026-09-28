@@ -8,12 +8,18 @@ const api = vi.hoisted(() => ({
   list: vi.fn(),
   get: vi.fn(),
   definePackages: vi.fn(),
+  listPackagingTypes: vi.fn(),
+  createPackagingType: vi.fn(),
   loadGeliverOffers: vi.fn(),
   refreshGeliver: vi.fn(),
+  queueNativeLabel: vi.fn(),
+  listPrintJobs: vi.fn(),
+  reprint: vi.fn(),
 }));
 
 vi.mock("../lib/api", () => ({
   shipmentApi: api,
+  warehouseAdminApi: { listPrintJobs: api.listPrintJobs, reprint: api.reprint },
   ApiError: class ApiError extends Error {
     constructor(message: string, public status?: number, public code?: string) { super(message); }
   },
@@ -28,7 +34,12 @@ const detail = {
   id: "ship-1", orderId: "order-1", orderNumber: "SHO-8415454003267", sourceChannel: "SHOPIFY",
   reservationId: "res-1", state: "PREPARING", packageCount: 0, packages: [], recipient: null,
   carrierSelection: null, handedOffAt: null, dispatchedAt: null,
-  requiredContents: [{ productId: "p-1", sku: "DSDST-4Y-7KQ30", title: "3 Yollu - 30mm", quantityBaseInt: 18, baseUomCode: "piece" }],
+  requiredContents: [{ productId: "p-1", sku: "DSDST-4Y-7KQ30", title: "3 Yollu - 30mm", quantityBaseInt: 18, baseUomCode: "piece", unitWeightGrams: 45 }],
+};
+
+const packagingType = {
+  id: "box-medium", name: "Orta Koli", type: "BOX", lengthMm: 400, widthMm: 300,
+  heightMm: 250, emptyWeightGrams: 190, active: true, updatedAt: "2026-09-28T08:00:00Z",
 };
 
 const completeRecipient = {
@@ -84,8 +95,13 @@ describe("Fulfillment mobile flow", () => {
       customerName: "Arda Gungor", createdAt: "2026-09-28T00:00:00Z", updatedAt: "2026-09-28T00:00:00Z" }]);
     api.get.mockReset().mockResolvedValue(detail);
     api.definePackages.mockReset().mockResolvedValue(undefined);
+    api.listPackagingTypes.mockReset().mockResolvedValue([packagingType]);
+    api.createPackagingType.mockReset();
     api.loadGeliverOffers.mockReset().mockResolvedValue([]);
     api.refreshGeliver.mockReset().mockResolvedValue([]);
+    api.queueNativeLabel.mockReset().mockResolvedValue({ id: "print-1", purpose: "SHIPPING", subject_code: "PKG-1", status: "QUEUED", attempts: [], history: [] });
+    api.listPrintJobs.mockReset().mockResolvedValue([]);
+    api.reprint.mockReset();
   });
 
   it("toplaması tamamlanan siparişleri platform, müşteri, satır ve adet özetiyle paketleme kuyruğunda gösterir", async () => {
@@ -96,11 +112,11 @@ describe("Fulfillment mobile flow", () => {
     expect(screen.getByText("1 ürün · 18 adet")).toBeInTheDocument();
   });
 
-  it("paket hazırlamada standart koli seçimi ölçüleri getirir ve çoklu koli eklenebilir", async () => {
+  it("paket hazırlamada Ayarlar'daki gerçek koli seçeneklerini gösterir ve çoklu koli eklenebilir", async () => {
     const user = userEvent.setup();
     render(<MemoryRouter initialEntries={["/shipments?shipmentId=ship-1"]}><ShipmentPage/></MemoryRouter>);
     await waitFor(() => expect(api.get).toHaveBeenCalledWith("ship-1"));
-    await user.click(await screen.findByRole("button", { name: /Orta/ }));
+    await user.click(await screen.findByRole("button", { name: /Orta Koli/ }));
     expect(screen.getByLabelText("Uzunluk (cm)")).toHaveValue("40");
     expect(screen.getByLabelText("Genişlik (cm)")).toHaveValue("30");
     expect(screen.getByLabelText("Yükseklik (cm)")).toHaveValue("25");
@@ -108,20 +124,36 @@ describe("Fulfillment mobile flow", () => {
     expect(screen.getByText(/Paket 2/i)).toBeInTheDocument();
   });
 
-  it("paket ağırlığını kg olarak alır ve API'ye güvenli biçimde gram gönderir", async () => {
+  it("ürün ve boş koli ağırlığını otomatik toplar; operatörden ağırlık istemez", async () => {
     const user = userEvent.setup();
     api.get.mockResolvedValueOnce(detail).mockResolvedValueOnce(offerReadyDetail);
     render(<MemoryRouter initialEntries={["/shipments?shipmentId=ship-1"]}><ShipmentPage/></MemoryRouter>);
 
-    await user.click(await screen.findByRole("button", { name: /Küçük/ }));
-    await user.type(screen.getByLabelText("Ağırlık (kg)"), "2,03");
+    await user.click(await screen.findByRole("button", { name: /Orta Koli/ }));
+    expect(screen.queryByLabelText("Ağırlık (kg)")).not.toBeInTheDocument();
+    expect(screen.getByText("Toplam ağırlık: 1 kg")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Paketleri Kaydet ve Devam Et/ }));
 
     await waitFor(() => expect(api.definePackages).toHaveBeenCalledWith("ship-1", [{
       packageNumber: 1,
-      measured: { lengthMm: 300, widthMm: 200, heightMm: 200, weightGrams: 2030 },
+      packagingTypeId: "box-medium",
       contents: [{ productId: "p-1", quantityBaseInt: 18 }],
     }], expect.any(String)));
+  });
+
+  it("kargo etiketi için telefon yazdırma penceresi açmadan yalnız yazıcı işi kuyruğa alır", async () => {
+    const user = userEvent.setup();
+    const labelReady = { ...offerReadyDetail, state: "LABEL_READY", packages: [{ ...offerReadyDetail.packages[0], label: {
+      reference: "https://labels.invalid/label.pdf", responsiveReference: null, sha256: "a".repeat(64), mediaType: "application/pdf", providerNative: true,
+    } }] };
+    api.get.mockResolvedValue(labelReady);
+    const printSpy = vi.spyOn(window, "print").mockImplementation(() => undefined);
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    render(<MemoryRouter initialEntries={["/shipments?shipmentId=ship-1"]}><ShipmentPage/></MemoryRouter>);
+    await user.click(await screen.findByRole("button", { name: "Yazıcıya Gönder" }));
+    await waitFor(() => expect(api.queueNativeLabel).toHaveBeenCalledWith("ship-1", "package-1", expect.any(String)));
+    expect(printSpy).not.toHaveBeenCalled();
+    expect(openSpy).not.toHaveBeenCalled();
   });
 
   it("boş Türkiye ilçesini provider doğrulamasına bırakır ve manuel adres formu göstermez", async () => {

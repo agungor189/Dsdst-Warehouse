@@ -138,6 +138,34 @@ describe("Warehouse BFF", () => {
     });
   });
 
+  it("named packaging types and package selection stay behind the Panel-owned gateway", async () => {
+    const received: Array<{ method: string; path: string; body: unknown }> = [];
+    const panelUrl = await startPanel((req, res) => {
+      received.push({ method: req.method, path: req.path, body: req.body });
+      res.status(req.method === "POST" ? 201 : 200).json({ success: true, data: [] });
+    });
+    const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET });
+    await request(app).get("/api/shipping/v1/packaging-types").set("Cookie", sessionCookie).expect(200);
+    await request(app).post("/api/shipping/v1/packaging-types").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN).send({
+      name: "Orta Koli", lengthMm: 400, widthMm: 300, heightMm: 250, emptyWeightGrams: 190,
+      idempotency_key: "box-create", active: false, unsafe: "drop",
+    }).expect(201);
+    await request(app).post("/api/shipping/v1/shipments/ship-1/packages").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN).send({
+      packages: [{ packageNumber: 1, packagingTypeId: "box-medium", measured: { weightGrams: 9999 },
+        contents: [{ productId: "p-1", quantityBaseInt: 2 }] }], idempotency_key: "package-select",
+    }).expect(201);
+    expect(received).toEqual([
+      { method: "GET", path: "/api/warehouse/v1/shipping/packaging-types", body: undefined },
+      { method: "POST", path: "/api/warehouse/v1/shipping/packaging-types", body: {
+        name: "Orta Koli", lengthMm: 400, widthMm: 300, heightMm: 250, emptyWeightGrams: 190, idempotency_key: "box-create",
+      } },
+      { method: "POST", path: "/api/warehouse/v1/shipping/shipments/ship-1/packages", body: {
+        packages: [{ packageNumber: 1, packagingTypeId: "box-medium", measured: null,
+          recipePackageNumber: null, contents: [{ productId: "p-1", quantityBaseInt: 2 }] }], idempotency_key: "package-select",
+      } },
+    ]);
+  });
+
   it("bulk handoff forwards only selected shipment ids, evidence and one stable operation key", async () => {
     let received: { path?: string; body?: unknown } = {};
     const panelUrl = await startPanel((req, res) => {

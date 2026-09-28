@@ -48,7 +48,7 @@ export interface ShipmentV1 {
   reservationId: string;
   state: ShipmentState;
   packageCount: number;
-  requiredContents: Array<{ productId: string; sku: string; title: string; quantityBaseInt: number; baseUomCode: string }>;
+  requiredContents: Array<{ productId: string; sku: string; title: string; quantityBaseInt: number; baseUomCode: string; unitWeightGrams: number }>;
   recipient: null | { name: string; email: string; phone: string | null; address1: string; address2: string | null;
     countryCode: string; cityName: string; cityCode: string; districtName: string; districtID: string | null; zip: string | null };
   packages: Array<{
@@ -70,6 +70,18 @@ export interface ShipmentV1 {
   };
   handedOffAt: string | null;
   dispatchedAt: string | null;
+}
+
+export interface PackagingTypeV1 {
+  id: string;
+  name: string;
+  type: "BOX";
+  lengthMm: number;
+  widthMm: number;
+  heightMm: number;
+  emptyWeightGrams: number;
+  active: boolean;
+  updatedAt: string;
 }
 
 export interface GeliverLivePackage {

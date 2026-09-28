@@ -18,6 +18,7 @@ import WarehouseLayoutPage from "./pages/WarehouseLayoutPage";
 import ReturnAcceptancePage from "./pages/ReturnAcceptancePage";
 import ShipmentPage from "./pages/ShipmentPage";
 import ReconciliationPage from "./pages/ReconciliationPage";
+import { AnalyticsPage } from "./pages/AnalyticsPage";
 
 const WarehouseMapPage = lazy(() => import("./pages/WarehouseMapPage"));
 
@@ -35,6 +36,7 @@ function AuthenticatedApp() {
         <Route path="/orders/:id/pick" element={<PickingPage />} />
         <Route path="/orders/:id/success" element={<SuccessPage />} />
         <Route path="/history" element={<PickHistoryPage />} />
+        <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/admin" element={<WarehouseAdminPage />} />
         <Route path="/admin/inbound" element={<InboundPage />} />
         <Route path="/returns" element={<ReturnAcceptancePage />} />

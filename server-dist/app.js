@@ -467,6 +467,15 @@ export function createWarehouseApp(config) {
     app.post("/api/inventory/v1/reservations/:id/dispatch", requireSession, (req, res) => res.status(409).json({ success: false, error: { code: "PHYSICAL_HANDOFF_REQUIRED",
             message: "Stok çıkışı yalnız doğrulanmış fiziksel taşıyıcı teslimiyle yapılabilir." } }));
     app.get("/api/shipping/v1/provider-contracts/geliver", requireSession, (req, res) => forward(req, res, "GET", "/shipping/provider-contracts/geliver"));
+    app.get("/api/shipping/v1/packaging-types", requireSession, (req, res) => forward(req, res, "GET", "/shipping/packaging-types"));
+    app.post("/api/shipping/v1/packaging-types", requireSession, (req, res) => forward(req, res, "POST", "/shipping/packaging-types", undefined, {
+        name: safeQueryText(req.body?.name, 120),
+        lengthMm: Number(req.body?.lengthMm),
+        widthMm: Number(req.body?.widthMm),
+        heightMm: Number(req.body?.heightMm),
+        emptyWeightGrams: Number(req.body?.emptyWeightGrams),
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
     app.get("/api/shipping/v1/shipments", requireSession, (req, res) => {
         const query = new URLSearchParams();
         const requestedScope = safeQueryText(req.query.scope, 20).toLowerCase();
@@ -482,8 +491,9 @@ export function createWarehouseApp(config) {
     app.post("/api/shipping/v1/shipments/:id/packages", requireSession, (req, res) => {
         const packages = Array.isArray(req.body?.packages) ? req.body.packages.slice(0, 50).map((item) => ({
             packageNumber: Number(item?.packageNumber),
+            packagingTypeId: safeQueryText(item?.packagingTypeId, 200) || null,
             recipePackageNumber: item?.recipePackageNumber == null ? null : Number(item.recipePackageNumber),
-            measured: item?.measured ? {
+            measured: item?.packagingTypeId ? null : item?.measured ? {
                 lengthMm: Number(item.measured.lengthMm), widthMm: Number(item.measured.widthMm),
                 heightMm: Number(item.measured.heightMm), weightGrams: Number(item.measured.weightGrams),
             } : null,

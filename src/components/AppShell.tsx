@@ -1,12 +1,11 @@
 import {
   Activity, AlertTriangle, ArrowDownUp, Boxes, Check, ClipboardList, Hash, Home, Layers3, LayoutDashboard,
-  LogOut, Map, MapPin, Menu, MoreHorizontal, Move, PackageCheck, Printer, RotateCcw,
-  ScanLine, Send, Settings2, Truck, UserRound, X,
+  LogOut, Map, MapPin, MoreHorizontal, Move, PackageCheck, Printer, RotateCcw,
+  ScanLine, Send, Settings2, Truck, X,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ComponentType, type PropsWithChildren } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { hasWarehousePermission, useAuth } from "../features/auth/AuthContext";
-import { useApiStatus } from "../lib/apiStatus";
 import type { WarehousePermission } from "../types/warehouse";
 
 type NavItem = {
@@ -36,6 +35,7 @@ const desktopLinks: Array<NavItem | { section: string }> = [
   { label: "Hareketler", to: "/movements", icon: Activity, permission: "warehouse:view_analytics" },
   { label: "Kullanıcı Aktiviteleri", to: "/user-activity", icon: Activity, permission: "warehouse:view_analytics" },
   { label: "Kapasite", to: "/capacity", icon: LayoutDashboard, permission: "warehouse:view_analytics" },
+  { label: "Operasyon Analizi", to: "/analytics", icon: Activity, permission: "warehouse:view_analytics" },
   { label: "Sistem Kontrolü", to: "/reconciliation", icon: AlertTriangle, permission: "warehouse:view_analytics" },
   { section: "YÖNETİM" },
   { label: "Ayarlar", to: "/admin", icon: Settings2 },
@@ -71,9 +71,7 @@ export function AppShell({ children }: PropsWithChildren) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
-  const apiStatus = useApiStatus();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const drawerCloseRef = useRef<HTMLButtonElement>(null);
@@ -104,7 +102,6 @@ export function AppShell({ children }: PropsWithChildren) {
 
   const requestLogout = () => {
     setMenuOpen(false);
-    setAccountMenuOpen(false);
     setLogoutConfirmOpen(true);
   };
 
@@ -126,30 +123,13 @@ export function AppShell({ children }: PropsWithChildren) {
       </aside>
 
       <div className={`wms-content ${pickingFlow ? "picking-flow" : ""}`}>
-        <header className="app-header">
-          <Link to="/" aria-label="Ana Sayfa"><Brand dark /></Link>
-          <div className="app-header-actions">
-            <span className={`api-pill api-${apiStatus}`} aria-label={`Panel API: ${apiStatus === "connected" ? "bağlı" : apiStatus === "disconnected" ? "bağlantı sorunu" : "kontrol ediliyor"}`}>
-              <i aria-hidden="true"/>API
-            </span>
-            <button className="header-menu-button mobile-only" type="button" aria-label="Menüyü aç" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}><Menu size={19}/></button>
-            <div className="desktop-account">
-              <button className="header-menu-button" type="button" aria-label="Hesap menüsü" aria-expanded={accountMenuOpen} onClick={() => setAccountMenuOpen((open) => !open)}><UserRound size={19}/></button>
-              {accountMenuOpen && <div className="account-popover" role="menu">
-                <strong>{user?.username}</strong>
-                <Link to="/admin" role="menuitem" onClick={() => setAccountMenuOpen(false)}><Settings2 size={17}/>Ayarlar</Link>
-                <button role="menuitem" onClick={requestLogout}><LogOut size={17}/>Çıkış Yap</button>
-              </div>}
-            </div>
-          </div>
-        </header>
-
         <main className="app-main">{children}</main>
 
         <nav className="mobile-bottom-nav" aria-label="Mobil ana navigasyon">
           <NavLink to="/" end><Home/><span>Ana Sayfa</span></NavLink>
           <NavLink to="/orders"><ClipboardList/><span>İşler</span></NavLink>
           <button type="button" className={activePicking ? "scan-active" : ""} aria-label="Tara" onClick={requestScan}><ScanLine/><span>Tara</span></button>
+          <NavLink to="/analytics"><Activity/><span>Analiz</span></NavLink>
           <button type="button" aria-label="Daha Fazla" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}><MoreHorizontal/><span>Daha Fazla</span></button>
         </nav>
       </div>

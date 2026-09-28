@@ -26,12 +26,14 @@ describe("AppShell hesap menüsü", () => {
     auth.permissions = new Set(["warehouse:pick_orders", "warehouse:receive"]);
   });
 
-  it("mobil persistent navigation yalnızca yeni dört hedefi gösterir", () => {
+  it("ortak üst headerı kaldırır ve mobil navigasyonda Analiz hedefini gösterir", () => {
     render(<MemoryRouter><AppShell><p>İçerik</p></AppShell></MemoryRouter>);
+    expect(document.querySelector(".app-header")).not.toBeInTheDocument();
     const nav = screen.getByRole("navigation", { name: "Mobil ana navigasyon" });
     expect(within(nav).getByText("Ana Sayfa")).toBeInTheDocument();
     expect(within(nav).getByText("İşler")).toBeInTheDocument();
     expect(within(nav).getByText("Tara")).toBeInTheDocument();
+    expect(within(nav).getByText("Analiz")).toBeInTheDocument();
     expect(within(nav).getByText("Daha Fazla")).toBeInTheDocument();
     expect(within(nav).queryByText("Mal Kabul")).not.toBeInTheDocument();
   });

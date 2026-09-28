@@ -77,7 +77,8 @@ describe("ScanInput kamera taraması", () => {
     render(<ScanInput onScan={onScan} busy={false}/>);
 
     await user.click(screen.getByRole("button", { name: "Kamera ile Tara" }));
-    expect(await screen.findByRole("dialog", { name: "Kamera ile kod tara" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Kamera ile kod tara" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Kamera ile kod tara" })).not.toBeInTheDocument();
     await waitFor(() => expect(scanner.callback).not.toBeNull());
     await act(async () => {
       scanner.callback?.({ getText: () => "A1-K2-P3" }, undefined, { stop: scanner.stop });
@@ -86,7 +87,7 @@ describe("ScanInput kamera taraması", () => {
 
     expect(onScan).toHaveBeenCalledWith("A1-K2-P3");
     expect(scanner.stop).toHaveBeenCalled();
-    expect(screen.queryByRole("dialog", { name: "Kamera ile kod tara" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Kamera ile kod tara" })).not.toBeInTheDocument();
   });
 
   it("kamera izni reddedilirse manuel giriş seçeneğini korur", async () => {
@@ -149,7 +150,7 @@ describe("ScanInput kamera taraması", () => {
     expect(screen.queryByRole("button", { name: "Kamera ile Tara" })).not.toBeInTheDocument();
 
     window.dispatchEvent(new Event("warehouse:request-scan"));
-    expect(await screen.findByRole("dialog", { name: "Kamera ile kod tara" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Kamera ile kod tara" })).toBeInTheDocument();
   });
 
   it("OCR kamerası kapatılınca tüm media tracklerini durdurur", async () => {
@@ -158,7 +159,7 @@ describe("ScanInput kamera taraması", () => {
     const user = userEvent.setup();
     render(<ScanInput mode="both" ocrCandidates={["H16"]} onScan={vi.fn().mockResolvedValue(true)} busy={false}/>);
     await user.click(screen.getByRole("button", { name: "Kamera ile Yazıyı Tara" }));
-    await screen.findByRole("dialog", { name: "Kamera ile tedarikçi no yazısını tara" });
+    await screen.findByRole("region", { name: "Kamera ile tedarikçi no yazısını tara" });
     await user.click(screen.getByRole("button", { name: "OCR kamerasını kapat" }));
     await waitFor(() => tracks.forEach((track) => expect(track.stop).toHaveBeenCalledTimes(1)));
   });
@@ -189,7 +190,7 @@ describe("ScanInput kamera taraması", () => {
     const user = userEvent.setup();
     const view = render(<ScanInput mode="both" ocrCandidates={["H16"]} onScan={vi.fn().mockResolvedValue(true)} busy={false}/>);
     await user.click(screen.getByRole("button", { name: "Kamera ile Yazıyı Tara" }));
-    await screen.findByRole("dialog", { name: "Kamera ile tedarikçi no yazısını tara" });
+    await screen.findByRole("region", { name: "Kamera ile tedarikçi no yazısını tara" });
     await waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled());
     view.unmount();
     await waitFor(() => expect(track.stop).toHaveBeenCalledTimes(1));

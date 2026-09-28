@@ -26,7 +26,7 @@ import type {
   InventoryReservationV1,
   WarehouseExecutionPackage,
   WarehouseExecutionLocation,
-  ShipmentV1, GeliverLivePackage, ShipmentListItem, BulkHandoffResult,
+  ShipmentV1, GeliverLivePackage, ShipmentListItem, BulkHandoffResult, PackagingTypeV1,
 } from "../types/warehouse";
 import type { ReceivingLot, ReceivingSession } from "../types/warehouse";
 import { reportApiResponse, reportApiUnavailable } from "./apiStatus";
@@ -249,6 +249,14 @@ export const reconciliationApi = {
 };
 
 export const shipmentApi = {
+  async listPackagingTypes() {
+    return (await request<PackagingTypeV1[]>("/shipping/v1/packaging-types")).data;
+  },
+  async createPackagingType(input: { name: string; lengthMm: number; widthMm: number; heightMm: number; emptyWeightGrams: number }, operationId = inventoryOperation()) {
+    return (await request<PackagingTypeV1>("/shipping/v1/packaging-types", {
+      method: "POST", body: JSON.stringify({ ...input, idempotency_key: operationId }),
+    })).data;
+  },
   async list(scope: "pending" | "completed" | "all" = "pending", query = "", limit = 200) {
     const params = new URLSearchParams({ scope, limit: String(limit) });
     if (query.trim()) params.set("q", query.trim());

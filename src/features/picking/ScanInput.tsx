@@ -57,15 +57,13 @@ export function ScanInput({
   useEffect(() => {
     if (!cameraOpen) return;
     let active = true;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     handledRef.current = false;
     setCameraReady(false);
     setCameraError("");
 
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraError("Bu cihaz veya tarayıcı kamera taramasını desteklemiyor. Manuel giriş kullanabilirsiniz.");
-      return () => { document.body.style.overflow = previousOverflow; };
+      return;
     }
 
     void import("@zxing/browser").then(async ({ BrowserMultiFormatReader }) => {
@@ -118,19 +116,16 @@ export function ScanInput({
       const stream = videoRef.current?.srcObject as MediaStream | null;
       stream?.getTracks?.().forEach((track) => track.stop());
       if (videoRef.current) videoRef.current.srcObject = null;
-      document.body.style.overflow = previousOverflow;
     };
   }, [cameraOpen]);
 
   useEffect(() => {
     if (!ocrOpen) return;
     let active = true;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     setOcrReady(false); setOcrEngineReady(false); setOcrBusy(false); setOcrError(""); setOcrOptions([]);
     if (!navigator.mediaDevices?.getUserMedia) {
       setOcrError("Bu cihaz kamera ile yazı okumayı desteklemiyor. Manuel giriş kullanabilirsiniz.");
-      return () => { document.body.style.overflow = previousOverflow; };
+      return;
     }
     void navigator.mediaDevices.getUserMedia({
       audio: false,
@@ -169,7 +164,6 @@ export function ScanInput({
       const worker = ocrWorkerRef.current;
       ocrWorkerRef.current = null;
       if (worker) void worker.terminate();
-      document.body.style.overflow = previousOverflow;
     };
   }, [ocrOpen]);
 
@@ -251,12 +245,12 @@ export function ScanInput({
         <button className={`primary-button w-full ${mode === "both" ? "col-span-2" : ""}`} disabled={!code.trim() || busy} type="submit">{busy ? "Kontrol ediliyor..." : "Doğrula"}</button>
       </div>}
       {cameraOpen && (
-        <div className="fixed inset-0 z-[70] flex flex-col bg-forest text-white" role="dialog" aria-modal="true" aria-label="Kamera ile kod tara">
-          <div className="flex items-center justify-between px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))]">
+        <section className="overflow-hidden rounded-[1.75rem] bg-forest text-white shadow-xl" role="region" aria-label="Kamera ile kod tara">
+          <div className="flex items-center justify-between px-4 py-3">
             <div><p className="text-xs font-black uppercase tracking-[0.18em] text-acid">Kamera taraması</p><h2 className="mt-1 text-xl font-black">{cameraTitle}</h2></div>
             <button className="grid size-11 place-items-center rounded-xl bg-white/10" type="button" aria-label="Kamerayı kapat" onClick={() => setCameraOpen(false)}><X size={23}/></button>
           </div>
-          <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black">
+          <div className="relative flex aspect-[4/3] items-center justify-center overflow-hidden bg-black">
             <video ref={videoRef} className="h-full w-full object-cover" autoPlay muted playsInline aria-label="Kamera görüntüsü"/>
             {!cameraError && (
               <div className="pointer-events-none absolute inset-x-[9%] top-1/2 aspect-[1.65/1] -translate-y-1/2 rounded-[2rem] border-2 border-acid shadow-[0_0_0_999px_rgba(0,0,0,0.38)]">
@@ -270,15 +264,15 @@ export function ScanInput({
             {!cameraReady && !cameraError && <div className="absolute rounded-2xl bg-black/65 px-5 py-4 text-center"><ScanLine className="mx-auto mb-2 animate-pulse text-acid"/><p className="font-black">Kamera hazırlanıyor...</p></div>}
             {cameraError && <div className="mx-5 max-w-sm rounded-2xl bg-white p-5 text-center text-ink"><TriangleAlert className="mx-auto text-danger" size={34}/><p className="mt-3 font-black">Kamera açılamadı</p><p className="mt-2 text-sm leading-6 text-muted">{cameraError}</p><button className="secondary-button mt-4 w-full" type="button" onClick={() => setCameraOpen(false)}>Manuel girişe dön</button></div>}
           </div>
-          <div className="px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4 text-center text-sm text-white/70">Kodu çerçevenin içine hizalayın. QR ve yaygın barkod türleri desteklenir.</div>
-        </div>
+          <div className="px-5 py-4 text-center text-sm text-white/70">Kodu çerçevenin içine hizalayın. QR ve yaygın barkod türleri desteklenir.</div>
+        </section>
       )}
       {ocrOpen && (
-        <div className="fixed inset-0 z-[75] flex flex-col bg-forest text-white" role="dialog" aria-modal="true" aria-label="Kamera ile tedarikçi no yazısını tara">
-          <div className="flex items-center justify-between px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))]"><div><p className="text-xs font-black uppercase tracking-[0.18em] text-acid">Yerel OCR</p><h2 className="mt-1 text-xl font-black">Tedarikçi No yazısını çerçeveye alın</h2></div><button className="grid size-11 place-items-center rounded-xl bg-white/10" type="button" aria-label="OCR kamerasını kapat" onClick={() => setOcrOpen(false)}><X size={23}/></button></div>
-          <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black"><video ref={ocrVideoRef} className="h-full w-full object-cover" autoPlay muted playsInline aria-label="OCR kamera görüntüsü"/>{!ocrError || ocrReady ? <div className="pointer-events-none absolute inset-x-[7%] top-1/2 aspect-[3.6/1] -translate-y-1/2 rounded-2xl border-4 border-acid shadow-[0_0_0_999px_rgba(0,0,0,0.48)]"><span className="absolute inset-x-6 top-1/2 h-0.5 bg-acid/80"/></div> : null}{!ocrReady && !ocrError && <div className="absolute rounded-2xl bg-black/70 px-5 py-4 text-center"><ScanText className="mx-auto mb-2 animate-pulse text-acid"/><p className="font-black">OCR kamerası hazırlanıyor…</p></div>}</div>
-          <div className="space-y-3 bg-forest px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4">{ocrError && <p role="alert" className="rounded-xl bg-white p-3 text-sm font-bold text-ink">{ocrError}</p>}{ocrOptions.length > 0 && <div className="grid gap-2"><p className="font-black">Hangisini okudunuz?</p>{ocrOptions.map((option) => <button key={option} type="button" className="secondary-button w-full" onClick={() => void acceptOcrCode(option)}>{option}</button>)}</div>}<button type="button" className="primary-button min-h-14 w-full" disabled={!ocrReady || !ocrEngineReady || ocrBusy} onClick={() => void captureOcr()}>{ocrBusy ? <><LoaderCircle className="animate-spin"/>Yazı okunuyor…</> : !ocrEngineReady ? <><LoaderCircle className="animate-spin"/>OCR hazırlanıyor…</> : <><ScanText/>Yazıyı Oku</>}</button><p className="text-center text-xs text-white/65">Görüntünün yalnız çerçeve içindeki bölümü cihazınızda işlenir.</p></div>
-        </div>
+        <section className="overflow-hidden rounded-[1.75rem] bg-forest text-white shadow-xl" role="region" aria-label="Kamera ile tedarikçi no yazısını tara">
+          <div className="flex items-center justify-between px-4 py-3"><div><p className="text-xs font-black uppercase tracking-[0.18em] text-acid">Yerel OCR</p><h2 className="mt-1 text-xl font-black">Tedarikçi No yazısını çerçeveye alın</h2></div><button className="grid size-11 place-items-center rounded-xl bg-white/10" type="button" aria-label="OCR kamerasını kapat" onClick={() => setOcrOpen(false)}><X size={23}/></button></div>
+          <div className="relative flex aspect-[4/3] items-center justify-center overflow-hidden bg-black"><video ref={ocrVideoRef} className="h-full w-full object-cover" autoPlay muted playsInline aria-label="OCR kamera görüntüsü"/>{!ocrError || ocrReady ? <div className="pointer-events-none absolute inset-x-[7%] top-1/2 aspect-[3.6/1] -translate-y-1/2 rounded-2xl border-4 border-acid shadow-[0_0_0_999px_rgba(0,0,0,0.48)]"><span className="absolute inset-x-6 top-1/2 h-0.5 bg-acid/80"/></div> : null}{!ocrReady && !ocrError && <div className="absolute rounded-2xl bg-black/70 px-5 py-4 text-center"><ScanText className="mx-auto mb-2 animate-pulse text-acid"/><p className="font-black">OCR kamerası hazırlanıyor…</p></div>}</div>
+          <div className="space-y-3 bg-forest px-5 py-4">{ocrError && <p role="alert" className="rounded-xl bg-white p-3 text-sm font-bold text-ink">{ocrError}</p>}{ocrOptions.length > 0 && <div className="grid gap-2"><p className="font-black">Hangisini okudunuz?</p>{ocrOptions.map((option) => <button key={option} type="button" className="secondary-button w-full" onClick={() => void acceptOcrCode(option)}>{option}</button>)}</div>}<button type="button" className="primary-button min-h-14 w-full" disabled={!ocrReady || !ocrEngineReady || ocrBusy} onClick={() => void captureOcr()}>{ocrBusy ? <><LoaderCircle className="animate-spin"/>Yazı okunuyor…</> : !ocrEngineReady ? <><LoaderCircle className="animate-spin"/>OCR hazırlanıyor…</> : <><ScanText/>Yazıyı Oku</>}</button><p className="text-center text-xs text-white/65">Görüntünün yalnız çerçeve içindeki bölümü cihazınızda işlenir.</p></div>
+        </section>
       )}
     </form>
   );

@@ -5,9 +5,9 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ScanInput } from "../features/picking/ScanInput";
 import { hasWarehousePermission, useAuth } from "../features/auth/AuthContext";
-import { ApiError, getErrorMessage, labelApi, warehouseAdminApi, warehouseExecutionApi, type PrintJob, type ReprintReason } from "../lib/api";
+import { ApiError, getErrorMessage, labelApi, shipmentApi, warehouseAdminApi, warehouseExecutionApi, type PrintJob, type ReprintReason } from "../lib/api";
 import { openPdfBlob } from "../lib/labels";
-import type { ReceivingPlacedPackage, ReceivingSession, WarehouseExecutionLocation, WarehouseExecutionPackage, WarehouseLocation, WarehousePackage, WarehousePermission, WarehouseReplenishmentTask } from "../types/warehouse";
+import type { PackagingTypeV1, ReceivingPlacedPackage, ReceivingSession, WarehouseExecutionLocation, WarehouseExecutionPackage, WarehouseLocation, WarehousePackage, WarehousePermission, WarehouseReplenishmentTask } from "../types/warehouse";
 
 const permissionLabels: Record<WarehousePermission, string> = {
   "warehouse:pick_orders": "Sipariş Toplama",
@@ -59,8 +59,21 @@ export function WarehouseAdminPage() {
   const visible = adminCards.filter((card) => hasWarehousePermission(user, card.permission));
   return <div className="space-y-5"><PageIntro eyebrow="Warehouse Admin" title="Depo operasyonları" description="Mal kabulden paket bazlı stok ve yerleştirmeye kadar kontrollü operasyon ekranları."/>
     <div className="grid gap-3 sm:grid-cols-2">{visible.map((card) => <Link key={card.to} to={card.to} className="rounded-2xl border border-line bg-white p-5 shadow-sm transition active:scale-[.99]"><card.icon className="text-moss"/><h2 className="mt-4 font-black">{card.title}</h2><p className="mt-1 text-sm leading-5 text-muted">{card.description}</p></Link>)}</div>
+    {hasWarehousePermission(user, "shipping:manage") && <PackagingTypesSettings/>}
     {!visible.length && <Notice error message="Bu kullanıcıya henüz Warehouse Admin yetkisi verilmemiş."/>}
   </div>;
+}
+
+function PackagingTypesSettings() {
+  const [items,setItems]=useState<PackagingTypeV1[]>([]); const [name,setName]=useState("");
+  const [length,setLength]=useState(""); const [width,setWidth]=useState(""); const [height,setHeight]=useState("");
+  const [emptyWeight,setEmptyWeight]=useState(""); const [busy,setBusy]=useState(false); const [message,setMessage]=useState(""); const [error,setError]=useState("");
+  useEffect(()=>{let active=true;shipmentApi.listPackagingTypes().then(data=>{if(active)setItems(data)}).catch(reason=>{if(active)setError(getErrorMessage(reason))});return()=>{active=false}},[]);
+  const save=async(event:FormEvent)=>{event.preventDefault();setBusy(true);setError("");setMessage("");try{const input={name:name.trim(),lengthMm:Math.round(Number(length.replace(",","."))*10),widthMm:Math.round(Number(width.replace(",","."))*10),heightMm:Math.round(Number(height.replace(",","."))*10),emptyWeightGrams:Math.round(Number(emptyWeight.replace(",",".")))};if(!input.name||![input.lengthMm,input.widthMm,input.heightMm,input.emptyWeightGrams].every(value=>Number.isSafeInteger(value)&&value>0))throw new Error("Koli adı, ölçüler ve boş koli ağırlığı pozitif olmalı.");const created=await shipmentApi.createPackagingType(input);setItems(current=>[...current,created].sort((a,b)=>a.name.localeCompare(b.name,"tr")));setName("");setLength("");setWidth("");setHeight("");setEmptyWeight("");setMessage(`${created.name} paketleme seçeneklerine eklendi.`)}catch(reason){setError(getErrorMessage(reason))}finally{setBusy(false)}};
+  return <section className="rounded-[1.75rem] border border-line bg-white p-5 shadow-sm"><div className="flex items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-xl bg-blue-50 text-moss"><Boxes size={22}/></span><div><p className="eyebrow">Paketleme ayarı</p><h2 className="mt-1 text-xl font-black">Koli seçenekleri</h2><p className="mt-1 text-sm leading-5 text-muted">Koli ölçüsü ve boş ağırlığı, paketlemede ürün ağırlığına otomatik eklenir.</p></div></div>
+    <div className="mt-4 grid gap-2">{items.map(item=><div key={item.id} className="flex items-center justify-between rounded-xl bg-canvas px-3 py-3 text-sm"><span><strong className="block">{item.name}</strong><small className="text-muted">{item.lengthMm/10}×{item.widthMm/10}×{item.heightMm/10} cm</small></span><b>{item.emptyWeightGrams} g</b></div>)}{!items.length&&!error&&<p className="rounded-xl bg-canvas p-3 text-sm text-muted">Henüz koli tanımı yok.</p>}</div>
+    <form className="mt-5 grid gap-3" onSubmit={save}><label className="text-xs font-bold text-muted">Koli adı<input className="field mt-1" value={name} onChange={event=>setName(event.target.value)} placeholder="Örn. Orta Koli"/></label><div className="grid grid-cols-3 gap-2"><label className="text-xs font-bold text-muted">Uzunluk (cm)<input className="field mt-1 px-3" inputMode="decimal" value={length} onChange={event=>setLength(event.target.value)}/></label><label className="text-xs font-bold text-muted">Genişlik (cm)<input className="field mt-1 px-3" inputMode="decimal" value={width} onChange={event=>setWidth(event.target.value)}/></label><label className="text-xs font-bold text-muted">Yükseklik (cm)<input className="field mt-1 px-3" inputMode="decimal" value={height} onChange={event=>setHeight(event.target.value)}/></label></div><label className="text-xs font-bold text-muted">Boş koli ağırlığı (g)<input className="field mt-1" inputMode="decimal" value={emptyWeight} onChange={event=>setEmptyWeight(event.target.value)}/></label>{error&&<Notice error message={error}/>} {message&&<Notice message={message}/>}<button className="primary-button" disabled={busy} type="submit">{busy?"Kaydediliyor…":"Koliyi Kaydet"}</button></form>
+  </section>;
 }
 
 const receivingBusinessErrors = new Set(["PLANNED_LOCATION_MISSING", "PLANNED_LOCATION_NOT_FOUND", "PLANNED_LOCATION_FULL"]);
