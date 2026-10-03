@@ -361,6 +361,20 @@ export interface WarehouseExecutionPackage {
   currentLocationCode: string | null;
 }
 
+export interface ProcurementReceiptIntent {
+  costSnapshotId: string;
+  purchaseOrderId: string;
+  purchaseLineId: string;
+  productId: string;
+  purchaseNumber: string;
+  orderDate: string;
+  supplierName: string;
+  sku: string;
+  productTitle: string;
+  quantityBaseInt: number;
+  baseUomCode: string;
+}
+
 export interface WarehouseExecutionLocation {
   id: string;
   code: string;

@@ -7,7 +7,7 @@ import { ScanInput } from "../features/picking/ScanInput";
 import { hasWarehousePermission, useAuth } from "../features/auth/AuthContext";
 import { ApiError, getErrorMessage, labelApi, shipmentApi, warehouseAdminApi, warehouseExecutionApi, type PrintJob, type ReprintReason } from "../lib/api";
 import { openPdfBlob } from "../lib/labels";
-import type { PackagingTypeV1, ReceivingPlacedPackage, ReceivingSession, WarehouseExecutionLocation, WarehouseExecutionPackage, WarehouseLocation, WarehousePackage, WarehousePermission, WarehouseReplenishmentTask } from "../types/warehouse";
+import type { PackagingTypeV1, ProcurementReceiptIntent, ReceivingPlacedPackage, ReceivingSession, WarehouseExecutionLocation, WarehouseExecutionPackage, WarehouseLocation, WarehousePackage, WarehousePermission, WarehouseReplenishmentTask } from "../types/warehouse";
 
 const permissionLabels: Record<WarehousePermission, string> = {
   "warehouse:pick_orders": "Sipariş Toplama",
@@ -323,6 +323,7 @@ function ExecutionPackageCard({ pkg }: { pkg: WarehouseExecutionPackage }) {
 
 export function InboundPage() {
   const [costSnapshotId, setCostSnapshotId] = useState("");
+  const [receiptIntents, setReceiptIntents] = useState<ProcurementReceiptIntent[]>([]);
   const [supplierLotCode, setSupplierLotCode] = useState("");
   const [packageCode, setPackageCode] = useState("");
   const [accepted, setAccepted] = useState("1");
@@ -331,6 +332,15 @@ export function InboundPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const loadReceiptIntents = async () => {
+    try {
+      const intents = await warehouseExecutionApi.listReceiptIntents();
+      setReceiptIntents(intents);
+      setCostSnapshotId((current) => current && intents.some((intent) => intent.costSnapshotId === current) ? current : (intents[0]?.costSnapshotId || ""));
+    } catch (reason) { setError(getErrorMessage(reason)); }
+  };
+  useEffect(() => { void loadReceiptIntents(); }, []);
+  const selectedIntent = receiptIntents.find((intent) => intent.costSnapshotId === costSnapshotId);
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
     try {
@@ -347,15 +357,18 @@ export function InboundPage() {
       });
       setPackages(result.packages);
       setMessage(`${result.status}: ${result.acceptedQuantityBaseInt} kullanılabilir, ${result.damagedQuantityBaseInt} karantina, ${result.shortageQuantityBaseInt} eksik.`);
+      await loadReceiptIntents();
     } catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); }
   };
   return <PermissionPage permission="warehouse:receive"><div className="space-y-5"><PageIntro eyebrow="Mal Kabul V2-08" title="Onaylı maliyet snapshot'ından kabul" description="Tek aşamalı kabul etkindir. Eksik miktar kaydedilir; fazla miktar önce yetkili onayı ister; hasarlı paket karantinaya gider."/>
     {message && <Notice message={message}/>} {error && <Notice error message={error}/>}<form onSubmit={submit} className="space-y-3 rounded-2xl border border-line bg-white p-4">
-      <input className="field" value={costSnapshotId} onChange={(event) => setCostSnapshotId(event.target.value)} placeholder="V2-06 maliyet snapshot ID" required/>
+      <label className="block text-sm font-bold">Panel onaylı satın alma<select className="field mt-1" value={costSnapshotId} onChange={(event) => setCostSnapshotId(event.target.value)} required><option value="">Onaylı mal kabul kaydı seçin</option>{receiptIntents.map((intent) => <option key={intent.costSnapshotId} value={intent.costSnapshotId}>{intent.purchaseNumber} · {intent.sku} · {intent.supplierName} · {intent.quantityBaseInt} {intent.baseUomCode}</option>)}</select></label>
+      {selectedIntent && <div className="rounded-xl border border-moss/20 bg-moss/5 p-3 text-sm"><strong>{selectedIntent.sku} · {selectedIntent.productTitle}</strong><p className="mt-1 text-muted">{selectedIntent.purchaseNumber} · {selectedIntent.supplierName} · planlanan {selectedIntent.quantityBaseInt} {selectedIntent.baseUomCode}</p></div>}
+      {receiptIntents.length === 0 && <Notice message="Panel tarafından mal kabul için onaylanmış satın alma bulunmuyor."/>}
       <input className="field uppercase" value={supplierLotCode} onChange={(event) => setSupplierLotCode(event.target.value)} placeholder="Tedarikçi lotu" required/>
       <input className="field uppercase" value={packageCode} onChange={(event) => setPackageCode(event.target.value)} placeholder="Paket kodu" required/>
       <div className="grid grid-cols-2 gap-3"><label className="text-sm font-bold">Kabul edilen<input className="field mt-1" type="number" min="0" step="1" value={accepted} onChange={(event) => setAccepted(event.target.value)} required/></label><label className="text-sm font-bold">Hasarlı / karantina<input className="field mt-1" type="number" min="0" step="1" value={damaged} onChange={(event) => setDamaged(event.target.value)} required/></label></div>
-      <button className="primary-button w-full" disabled={busy || Number(accepted) + Number(damaged) <= 0}>Kabulü kaydet ve paket oluştur</button>
+      <button className="primary-button w-full" disabled={busy || !selectedIntent || Number(accepted) + Number(damaged) <= 0}>Kabulü kaydet ve paket oluştur</button>
     </form>{packages.map((pkg) => <ExecutionPackageCard key={pkg.id} pkg={pkg}/>)}</div></PermissionPage>;
 }
 

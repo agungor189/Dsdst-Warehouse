@@ -19,6 +19,7 @@ import type {
   WarehousePlacementLayout,
   WarehousePlacementPreview,
   WarehouseReplenishmentTask,
+  ProcurementReceiptIntent,
   CatalogProductV1,
   CatalogUomRegistryV1,
   InventoryAvailabilityV1,
@@ -371,6 +372,9 @@ const warehouseDeviceId = () => {
 const executionOperation = () => crypto.randomUUID();
 
 export const warehouseExecutionApi = {
+  async listReceiptIntents() {
+    return (await request<ProcurementReceiptIntent[]>("/execution/receipt-intents")).data;
+  },
   async getPackage(packageIdOrCode: string) {
     return (await request<WarehouseExecutionPackage>(`/execution/packages/${encodeURIComponent(packageIdOrCode)}`)).data;
   },

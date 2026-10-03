@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
   listReceivingSessions: vi.fn(), getMyActiveReceivingPackage: vi.fn(), getReceivingSession: vi.fn(), listMyReceivingPackages: vi.fn(),
-  receiveGoods: vi.fn(),
+  receiveGoods: vi.fn(), listReceiptIntents: vi.fn(),
 }));
 
 vi.mock("../features/auth/AuthContext", () => ({
@@ -16,7 +16,7 @@ vi.mock("../lib/api", () => ({
   ApiError: class ApiError extends Error { constructor(message: string, public status?: number, public code?: string) { super(message); } },
   getErrorMessage: (error: unknown) => error instanceof Error ? error.message : "Hata",
   warehouseAdminApi: api,
-  warehouseExecutionApi: { receiveGoods: api.receiveGoods },
+  warehouseExecutionApi: { receiveGoods: api.receiveGoods, listReceiptIntents: api.listReceiptIntents },
 }));
 
 import { formatReceivingEvent, InboundPage, LabelingPage, LabelTemplatesPage, PrintJobsPage, ReplenishmentPage, requestReceivingLocationWithRetry } from "./WarehouseAdminPages";
@@ -28,6 +28,7 @@ describe("Mal Kabul kullanıcı akışı", () => {
     api.getReceivingSession.mockReset();
     api.listMyReceivingPackages.mockReset();
     api.receiveGoods.mockReset();
+    api.listReceiptIntents.mockReset().mockResolvedValue([{ costSnapshotId: "snapshot-1", purchaseOrderId: "po-1", purchaseLineId: "line-1", productId: "product-1", purchaseNumber: "PO-1", orderDate: "2026-10-03", supplierName: "Supplier", sku: "SKU-1", productTitle: "Product", quantityBaseInt: 10, baseUomCode: "piece" }]);
   });
   it("yalnız V2-08 receipt komutunu kullanır ve partial policy'yi kapalı tutar", () => {
     const source = InboundPage.toString();
@@ -105,7 +106,8 @@ describe("Mal Kabul kullanıcı akışı", () => {
     });
     const user = userEvent.setup();
     render(createElement(InboundPage));
-    await user.type(screen.getByPlaceholderText("V2-06 maliyet snapshot ID"), "snapshot-1");
+    await screen.findByRole("option", { name: /PO-1.*SKU-1/ });
+    await user.selectOptions(screen.getByRole("combobox", { name: "Panel onaylı satın alma" }), "snapshot-1");
     await user.type(screen.getByPlaceholderText("Tedarikçi lotu"), "LOT-1");
     await user.type(screen.getByPlaceholderText("Paket kodu"), "PKG-1");
     const quantities = screen.getAllByRole("spinbutton");
