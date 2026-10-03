@@ -373,6 +373,13 @@ export interface ProcurementReceiptIntent {
   productTitle: string;
   quantityBaseInt: number;
   baseUomCode: string;
+  supplierNo: string | null;
+  totalQuantity: number | null;
+  boxCount: number | null;
+  unitsPerBox: number | null;
+  boxWeightKg: number | null;
+  totalWeightKg: number | null;
+  partWeightG: number | null;
 }
 
 export interface WarehouseExecutionLocation {

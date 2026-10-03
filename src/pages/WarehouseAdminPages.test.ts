@@ -28,7 +28,7 @@ describe("Mal Kabul kullanıcı akışı", () => {
     api.getReceivingSession.mockReset();
     api.listMyReceivingPackages.mockReset();
     api.receiveGoods.mockReset();
-    api.listReceiptIntents.mockReset().mockResolvedValue([{ costSnapshotId: "snapshot-1", purchaseOrderId: "po-1", purchaseLineId: "line-1", productId: "product-1", purchaseNumber: "PO-1", orderDate: "2026-10-03", supplierName: "Supplier", sku: "SKU-1", productTitle: "Product", quantityBaseInt: 10, baseUomCode: "piece" }]);
+    api.listReceiptIntents.mockReset().mockResolvedValue([{ costSnapshotId: "snapshot-1", purchaseOrderId: "po-1", purchaseLineId: "line-1", productId: "product-1", purchaseNumber: "PO-1", orderDate: "2026-10-03", supplierName: "Supplier", sku: "SKU-1", productTitle: "Product", quantityBaseInt: 10, baseUomCode: "piece", supplierNo: "H101", totalQuantity: 10, boxCount: 2, unitsPerBox: 5, boxWeightKg: 1.25, totalWeightKg: 2.5, partWeightG: 250 }]);
   });
   it("yalnız V2-08 receipt komutunu kullanır ve partial policy'yi kapalı tutar", () => {
     const source = InboundPage.toString();
@@ -107,6 +107,8 @@ describe("Mal Kabul kullanıcı akışı", () => {
     const user = userEvent.setup();
     render(createElement(InboundPage));
     await screen.findByRole("option", { name: /PO-1.*SKU-1/ });
+    expect(screen.getByText("2 koli × 5 adet")).toBeInTheDocument();
+    expect(screen.getByText("2.50 kg")).toBeInTheDocument();
     await user.selectOptions(screen.getByRole("combobox", { name: "Panel onaylı satın alma" }), "snapshot-1");
     await user.type(screen.getByPlaceholderText("Tedarikçi lotu"), "LOT-1");
     await user.type(screen.getByPlaceholderText("Paket kodu"), "PKG-1");
