@@ -340,6 +340,8 @@ export interface WarehousePackage {
 }
 
 export interface WarehouseExecutionPackage {
+  sku?: string; productTitle?: string; productType?: string; size?: string | null;
+  sourceCartonId?: string; sourceGroupRef?: string; planVersion?: string;
   id: string;
   code: string;
   receiptId: string;
@@ -362,6 +364,7 @@ export interface WarehouseExecutionPackage {
 }
 
 export interface ProcurementReceiptIntent {
+  packagePlan?: { version: string; packages: PlannedReceiptPackage[] } | null;
   costSnapshotId: string;
   purchaseOrderId: string;
   purchaseLineId: string;
@@ -380,6 +383,12 @@ export interface ProcurementReceiptIntent {
   boxWeightKg: number | null;
   totalWeightKg: number | null;
   partWeightG: number | null;
+}
+
+export interface PlannedReceiptPackage {
+  id: string; code: string; quantityBaseInt: number; mixed: boolean;
+  sourceCartonId: string; sourceGroupRef: string; sourceItemRef: string;
+  grossWeightKgEstimate: number | null; sku: string; title: string; productType: string; size: string | null;
 }
 
 export interface WarehouseExecutionLocation {

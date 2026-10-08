@@ -409,7 +409,7 @@ export const warehouseExecutionApi = {
       },
     )).data;
   },
-  async receiveGoods(input: Record<string, unknown>, operationId = executionOperation()) {
+  async receiveGoods(input: Record<string, unknown>, operationId: string = executionOperation()) {
     return (await request<{ id: string; status: string; acceptedQuantityBaseInt: number; damagedQuantityBaseInt: number; shortageQuantityBaseInt: number; excessQuantityBaseInt: number; packages: WarehouseExecutionPackage[] }>("/execution/receipts", {
       method: "POST", body: JSON.stringify({ ...input, idempotency_key: operationId }),
     })).data;

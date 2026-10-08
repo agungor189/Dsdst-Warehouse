@@ -1,3 +1,4 @@
+import { preparePlannedReceipt, type PackageObservation } from '../features/receiving/packagePlan';
 import {
   Boxes, CheckCircle2, ClipboardCheck, Eye, MapPin, Move, PackageCheck, Pause, Play, Printer, RefreshCw, Scale, Settings2, X,
 } from "lucide-react";
@@ -318,10 +319,13 @@ function PackageCard({ pkg }: { pkg: WarehousePackage }) {
 }
 
 function ExecutionPackageCard({ pkg }: { pkg: WarehouseExecutionPackage }) {
-  return <div className="rounded-2xl border border-line bg-white p-5"><span className="text-xs font-black uppercase text-moss">{pkg.status}</span><h2 className="mt-1 text-2xl font-black">{pkg.code}</h2><p className="mt-2 font-bold">Ürün: {pkg.productId}</p><p className="mt-1 text-sm text-muted">Lot {pkg.supplierLotCode} · {pkg.remainingQuantityBaseInt} {pkg.baseUomCode}</p>{pkg.currentLocationCode && <p className="mt-2 font-black text-moss">{pkg.currentLocationCode}</p>}</div>;
+  return <div className="rounded-2xl border border-line bg-white p-5"><span className="text-xs font-black uppercase text-moss">{pkg.status}</span><h2 className="mt-1 text-2xl font-black">{pkg.code}</h2><p className="mt-2 font-bold">{pkg.sku || pkg.productId} · {pkg.productTitle} · {pkg.productType} · {pkg.size}</p>{pkg.sourceCartonId && <p className="text-xs">Kaynak koli {pkg.sourceGroupRef} / {pkg.sourceCartonId}</p>}<p className="mt-1 text-sm text-muted">Lot {pkg.supplierLotCode} · {pkg.remainingQuantityBaseInt} {pkg.baseUomCode}</p>{pkg.currentLocationCode && <p className="mt-2 font-black text-moss">{pkg.currentLocationCode}</p>}</div>;
 }
 
 export function InboundPage() {
+  const [scannedPackage, setScannedPackage] = useState("");
+  const [observations, setObservations] = useState<Record<string, PackageObservation>>({});
+  const [retry, setRetry] = useState<{ key: string; body: any; operationId: string } | null>(null);
   const [costSnapshotId, setCostSnapshotId] = useState("");
   const [receiptIntents, setReceiptIntents] = useState<ProcurementReceiptIntent[]>([]);
   const [supplierLotCode, setSupplierLotCode] = useState("");
@@ -350,11 +354,17 @@ export function InboundPage() {
       const receiptPackages: Array<Record<string, unknown>> = [];
       if (acceptedQuantityBaseInt > 0) receiptPackages.push({ id: crypto.randomUUID(), code: packageCode.trim(), quantityBaseInt: acceptedQuantityBaseInt, disposition: "ACCEPTED" });
       if (damagedQuantityBaseInt > 0) receiptPackages.push({ id: crypto.randomUUID(), code: `${packageCode.trim()}-DAMAGED`, quantityBaseInt: damagedQuantityBaseInt, disposition: "DAMAGED" });
-      const result = await warehouseExecutionApi.receiveGoods({
+      const body = {
         receiptId, receiptSeriesId: receiptId, stageIndex: 1, isFinal: true,
         costSnapshotId: costSnapshotId.trim(), supplierLotCode: supplierLotCode.trim(),
         acceptedQuantityBaseInt, damagedQuantityBaseInt, receivedAt: new Date().toISOString(), packages: receiptPackages,
-      });
+        ...(selectedIntent?.packagePlan ? preparePlannedReceipt(selectedIntent.packagePlan, observations) : {}),
+      };
+      const key = JSON.stringify({ costSnapshotId, supplierLotCode, observations, accepted, damaged, packageCode });
+      const attempt = retry?.key === key ? retry : { key, body, operationId: crypto.randomUUID() };
+      setRetry(attempt);
+      const result = await warehouseExecutionApi.receiveGoods(attempt.body, attempt.operationId);
+      setRetry(null);
       setPackages(result.packages);
       setMessage(`${result.status}: ${result.acceptedQuantityBaseInt} kullanılabilir, ${result.damagedQuantityBaseInt} karantina, ${result.shortageQuantityBaseInt} eksik.`);
       await loadReceiptIntents();
@@ -366,9 +376,10 @@ export function InboundPage() {
       {selectedIntent && <div className="rounded-xl border border-moss/20 bg-moss/5 p-3 text-sm"><strong>{selectedIntent.sku} · {selectedIntent.productTitle}</strong><p className="mt-1 text-muted">{selectedIntent.purchaseNumber} · {selectedIntent.supplierName} · planlanan {selectedIntent.totalQuantity ?? selectedIntent.quantityBaseInt} {selectedIntent.baseUomCode}</p>{selectedIntent.boxCount != null && selectedIntent.unitsPerBox != null && <div className="mt-3 grid grid-cols-2 gap-2 rounded-lg bg-white/70 p-3 text-xs sm:grid-cols-4"><p><span className="block text-muted">Tedarik No</span><b>{selectedIntent.supplierNo || "—"}</b></p><p><span className="block text-muted">Paketleme</span><b>{selectedIntent.boxCount} koli × {selectedIntent.unitsPerBox} adet</b></p><p><span className="block text-muted">Koli Ağırlığı</span><b>{selectedIntent.boxWeightKg?.toFixed(2)} kg</b></p><p><span className="block text-muted">Toplam Ağırlık</span><b>{selectedIntent.totalWeightKg?.toFixed(2)} kg</b></p></div>}</div>}
       {receiptIntents.length === 0 && <Notice message="Panel tarafından mal kabul için onaylanmış satın alma bulunmuyor."/>}
       <input className="field uppercase" value={supplierLotCode} onChange={(event) => setSupplierLotCode(event.target.value)} placeholder="Tedarikçi lotu" required/>
-      <input className="field uppercase" value={packageCode} onChange={(event) => setPackageCode(event.target.value)} placeholder="Paket kodu" required/>
+      {selectedIntent?.packagePlan && <div className="space-y-2"><label>Paket barkodu tara<input className="field" value={scannedPackage} onChange={e => setScannedPackage(e.target.value.trim().toUpperCase())}/></label>{scannedPackage && <p role="status">{selectedIntent.packagePlan.packages.some(p => p.code === scannedPackage) ? "Paket bu alış satırının planında. Tarama stok oluşturmaz." : "Bu barkod seçili satırın planında yok."}</p>}<p className="text-xs">Plan {selectedIntent.packagePlan.version} · Tüm paketler bu alış satırı için birlikte kabul edilir. Sayım ve tarama stok artırmaz.</p>{selectedIntent.packagePlan.packages.map(p => { const o = observations[p.id] || { quantity: "", disposition: "ACCEPTED", weightKg: "", splitConfirmed: false }; const update = (fields: Partial<PackageObservation>) => setObservations(old => ({ ...old, [p.id]: { ...o, ...fields } })); return <div className={`rounded-xl border p-3 ${scannedPackage === p.code ? "border-moss bg-moss/5" : ""}`} key={p.id}><strong>{p.code}</strong><p className="text-xs">{p.sku} · {p.productType} · {p.title} · {p.size} · Planlanan {p.quantityBaseInt} · Kaynak koli {p.sourceGroupRef} / {p.sourceCartonId}</p><p className="text-xs">{p.grossWeightKgEstimate == null ? "Ağırlık —" : `Tahmini ${p.grossWeightKgEstimate.toFixed(3)} kg`}</p><label>Gerçek adet<input className="field" type="number" min="0" value={o.quantity} onChange={e => update({ quantity: e.target.value })}/></label><label>Ağırlık (kg)<input className="field" value={o.weightKg} onChange={e => update({ weightKg: e.target.value })}/></label><select className="field" value={o.disposition} onChange={e => update({ disposition: e.target.value })}><option value="ACCEPTED">Kabul</option><option value="DAMAGED">Hasarlı / karantina</option></select>{p.mixed && <label><input type="checkbox" checked={o.splitConfirmed} onChange={e => update({ splitConfirmed: e.target.checked })}/> Kaynak karışık koliden ayırdım ve bu paketi tarttım</label>}</div>; })}</div>}
+      {!selectedIntent?.packagePlan && <><input className="field uppercase" value={packageCode} onChange={(event) => setPackageCode(event.target.value)} placeholder="Paket kodu" required/>
       <div className="grid grid-cols-2 gap-3"><label className="text-sm font-bold">Kabul edilen<input className="field mt-1" type="number" min="0" step="1" value={accepted} onChange={(event) => setAccepted(event.target.value)} required/></label><label className="text-sm font-bold">Hasarlı / karantina<input className="field mt-1" type="number" min="0" step="1" value={damaged} onChange={(event) => setDamaged(event.target.value)} required/></label></div>
-      <button className="primary-button w-full" disabled={busy || !selectedIntent || Number(accepted) + Number(damaged) <= 0}>Kabulü kaydet ve paket oluştur</button>
+      </>}<button className="primary-button w-full" disabled={busy || !selectedIntent || (!selectedIntent.packagePlan && Number(accepted) + Number(damaged) <= 0)}>Kabulü kaydet ve paket oluştur</button>
     </form>{packages.map((pkg) => <ExecutionPackageCard key={pkg.id} pkg={pkg}/>)}</div></PermissionPage>;
 }
 
