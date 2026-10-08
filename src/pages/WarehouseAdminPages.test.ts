@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
   listReceivingSessions: vi.fn(), getMyActiveReceivingPackage: vi.fn(), getReceivingSession: vi.fn(), listMyReceivingPackages: vi.fn(),
-  receiveGoods: vi.fn(), listReceiptIntents: vi.fn(),
+  receiveGoods: vi.fn(), listReceiptIntents: vi.fn(), queuePrint: vi.fn(),
 }));
 
 vi.mock("../features/auth/AuthContext", () => ({
@@ -98,10 +98,23 @@ describe("Mal Kabul kullanıcı akışı", () => {
       .toBe("PCI-R100-ELB 2/4 etiketi basıldı.");
   });
 
-  it("snapshot, gerçek kabul ve hasarlı miktarı tek aşamalı kanonik komuta gönderir", async () => {
+  it("onaylı paket planını kabul öncesi güncel sayımla yazdırır, kabul komutu göndermez", async () => {
+    api.queuePrint.mockResolvedValue({ id: 'job-fixture' });
+    api.listReceiptIntents.mockResolvedValue([{ costSnapshotId: 'snapshot-plan', purchaseNumber: 'PO-PLAN', sku: 'PART', productTitle: 'Part', quantityBaseInt: 5, baseUomCode: 'piece', packagePlan: { version: 'plan1', packages: [{ id: 'p1', code: 'PKG-1', quantityBaseInt: 5, mixed: false, sku: 'PART', title: 'Part', productType: 'component', sourceCartonId: 'c1', sourceGroupRef: 'g1', grossWeightKgEstimate: null }] } }]);
+    const user = userEvent.setup(); render(createElement(InboundPage));
+    await screen.findByText('PKG-1');
+    expect(screen.queryByText('Hasarlı / karantina')).not.toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText('Tedarikçi lotu'), 'LOT-1');
+    await user.type(screen.getByLabelText('Gerçek adet'), '4');
+    await user.click(screen.getByRole('button', { name: 'Etiket Yazdır' }));
+    expect(api.queuePrint).toHaveBeenCalledWith('p1', undefined, { planVersion: 'plan1', supplierLotCode: 'LOT-1', quantityBaseInt: 4 });
+    expect(api.receiveGoods).not.toHaveBeenCalled();
+  });
+
+  it("snapshot ve gerçek kabulü hasarsız olarak tek aşamalı kanonik komuta gönderir", async () => {
     api.receiveGoods.mockResolvedValue({
       id: "receipt-1", status: "ACCEPTED_WITH_VARIANCE", acceptedQuantityBaseInt: 8,
-      damagedQuantityBaseInt: 2, shortageQuantityBaseInt: 2, excessQuantityBaseInt: 0,
+      damagedQuantityBaseInt: 0, shortageQuantityBaseInt: 2, excessQuantityBaseInt: 0,
       packages: [{ id: "package-1", code: "PKG-1", receiptId: "receipt-1", inventoryLotId: "lot-1", productId: "product-1", supplierLotCode: "LOT-1", purchaseOrderId: "po-1", purchaseLineId: "line-1", costSnapshotId: "snapshot-1", baseUomCode: "piece", initialQuantityBaseInt: 8, remainingQuantityBaseInt: 8, targetQuantityBaseInt: 8, weightGrams: 0, disposition: "ACCEPTED", labelIdentity: null, status: "RECEIVED", currentSlotId: null, currentLocationCode: null }],
     });
     const user = userEvent.setup();
@@ -114,15 +127,15 @@ describe("Mal Kabul kullanıcı akışı", () => {
     await user.type(screen.getByPlaceholderText("Paket kodu"), "PKG-1");
     const quantities = screen.getAllByRole("spinbutton");
     await user.clear(quantities[0]); await user.type(quantities[0], "8");
-    await user.clear(quantities[1]); await user.type(quantities[1], "2");
+    expect(quantities).toHaveLength(1);
+    expect(screen.queryByText("Hasarlı / karantina")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Kabulü kaydet ve paket oluştur" }));
     expect(api.receiveGoods).toHaveBeenCalledOnce();
-    expect(api.receiveGoods.mock.calls[0][0]).toMatchObject({ costSnapshotId: "snapshot-1", supplierLotCode: "LOT-1", stageIndex: 1, isFinal: true, acceptedQuantityBaseInt: 8, damagedQuantityBaseInt: 2 });
+    expect(api.receiveGoods.mock.calls[0][0]).toMatchObject({ costSnapshotId: "snapshot-1", supplierLotCode: "LOT-1", stageIndex: 1, isFinal: true, acceptedQuantityBaseInt: 8, damagedQuantityBaseInt: 0 });
     expect(api.receiveGoods.mock.calls[0][0].packages).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "PKG-1", quantityBaseInt: 8, disposition: "ACCEPTED" }),
-      expect.objectContaining({ code: "PKG-1-DAMAGED", quantityBaseInt: 2, disposition: "DAMAGED" }),
     ]));
-    expect(await screen.findByText(/8 kullanılabilir, 2 karantina/)).toBeInTheDocument();
+    expect(await screen.findByText(/8 kullanılabilir, 2 eksik/)).toBeInTheDocument();
     expect(screen.getByText("PKG-1")).toBeInTheDocument();
   });
 });

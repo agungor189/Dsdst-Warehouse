@@ -672,9 +672,10 @@ describe("Warehouse BFF", () => {
     const received: Array<{ path: string; body: unknown }> = [];
     const labelUrl = await startPanel((req, res) => {
       const purpose = String(req.query.purpose);
+      expect(req.query.contract).toBe(purpose === "goods_receipt" ? "package_identity" : undefined);
       res.json({ id: `${purpose}-v3`, name: purpose, purpose, version: 3, contentHash: "a".repeat(64),
         width: 100, height: purpose === "goods_receipt" ? 150 : 50,
-        elements: [{ id: "barcode", type: "barcode", value: purpose === "goods_receipt" ? "{SKU}" : "{Lokasyon}" }] });
+        elements: [{ id: "barcode", type: "barcode", value: purpose === "goods_receipt" ? "{Package_code}" : "{Lokasyon}" }] });
     });
     const panelUrl = await startPanel((req, res) => {
       received.push({ path: req.path, body: req.body });
@@ -682,17 +683,38 @@ describe("Warehouse BFF", () => {
     });
     const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET, labelPrinterBaseUrl: labelUrl });
     await request(app).post("/api/admin/packages/pkg-1/print").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
-      .send({ idempotency_key: "p-1", template_purpose: "shipping" });
+      .send({ idempotency_key: "p-1", template_purpose: "shipping", observation: { planVersion: "plan1", supplierLotCode: "LOT", quantityBaseInt: 29 } });
     await request(app).post("/api/admin/locations/loc-1/print").set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
       .send({ idempotency_key: "l-1", template_purpose: "custom" });
     expect(received).toEqual([
-      { path: "/api/warehouse/v1/admin/packages/pkg-1/print", body: { claim_token: null, idempotency_key: "p-1", device_id: "", printer_name: null,
+      { path: "/api/warehouse/v1/admin/packages/pkg-1/print", body: { claim_token: null, observation: { planVersion: "plan1", supplierLotCode: "LOT", quantityBaseInt: 29 }, idempotency_key: "p-1", device_id: "", printer_name: null,
         template_snapshot: { id: "goods_receipt-v3", name: "goods_receipt", purpose: "goods_receipt", version: 3, contentHash: "a".repeat(64), width: 100, height: 150,
-          elements: [{ id: "barcode", type: "barcode", value: "{SKU}" }] } } },
+          elements: [{ id: "barcode", type: "barcode", value: "{Package_code}" }] } } },
       { path: "/api/warehouse/v1/admin/locations/loc-1/print", body: { idempotency_key: "l-1", device_id: "", printer_name: null,
         template_snapshot: { id: "location-v3", name: "location", purpose: "location", version: 3, contentHash: "a".repeat(64), width: 100, height: 50,
           elements: [{ id: "barcode", type: "barcode", value: "{Lokasyon}" }] } } },
     ]);
+  });
+
+  it("planned package preview forwards one selected package observation to P", async () => {
+    let query: unknown;
+    const panelUrl = await startPanel((req, res) => { query = req.query; expect(req.path).toBe('/api/warehouse/v1/admin/packages/pkg-plan/print-preview'); res.json({ success: true, data: { payload: { Package_code: 'PKG-PLAN' } } }); });
+    const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET });
+    const response = await request(app).get('/api/admin/packages/pkg-plan/print-preview?planVersion=v1&supplierLotCode=LOT&quantityBaseInt=29&unsafe=drop').set('Cookie', sessionCookie);
+    expect(response.status).toBe(200);
+    expect(query).toEqual({ planVersion: 'v1', supplierLotCode: 'LOT', quantityBaseInt: '29' });
+  });
+
+  it("receipt-only user can preview package identity but cannot preview locations", async () => {
+    const labelRequest = vi.fn((req, res) => { expect(req.body.contract).toBe('package_identity'); res.type('application/pdf').send('%PDF-fixture'); });
+    const labelUrl = await startPanel(labelRequest);
+    const panelUrl = await startPanel((_req, res) => res.json({ success: true, user: { id: 'receiver', role: 'user', permissions: { 'warehouse:receive': true } } }));
+    const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET, labelPrinterBaseUrl: labelUrl });
+    for (const [purpose, status] of [['goods_receipt', 200], ['location', 403]] as const) {
+      const response = await request(app).post('/api/labels/preview').set('Cookie', sessionCookie).set('Origin', TRUSTED_ORIGIN).send({ purpose, data: { Package_code: 'PKG-1' } });
+      expect(response.status).toBe(status);
+    }
+    expect(labelRequest).toHaveBeenCalledOnce();
   });
 
   it("tamamlama notunu kırpar ve bilinmeyen body alanlarını panele göndermez", async () => {

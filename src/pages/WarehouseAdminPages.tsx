@@ -331,7 +331,6 @@ export function InboundPage() {
   const [supplierLotCode, setSupplierLotCode] = useState("");
   const [packageCode, setPackageCode] = useState("");
   const [accepted, setAccepted] = useState("1");
-  const [damaged, setDamaged] = useState("0");
   const [packages, setPackages] = useState<WarehouseExecutionPackage[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -345,41 +344,56 @@ export function InboundPage() {
   };
   useEffect(() => { void loadReceiptIntents(); }, []);
   const selectedIntent = receiptIntents.find((intent) => intent.costSnapshotId === costSnapshotId);
+  const printPlanned = async (packageId: string, previewOnly: boolean) => {
+    if (!selectedIntent?.packagePlan) return;
+    setBusy(true); setError(''); setMessage('');
+    try {
+      const observed = observations[packageId]?.quantity;
+      const observation = { planVersion: selectedIntent.packagePlan.version, supplierLotCode: supplierLotCode.trim(),
+        ...(observed !== undefined && observed !== '' ? { quantityBaseInt: Number(observed) } : {}) };
+      if (previewOnly) {
+        const snapshot = await warehouseAdminApi.getPackagePrintPreview(packageId, observation);
+        openPdfBlob(await labelApi.preview('goods_receipt', snapshot.payload));
+      } else {
+        await warehouseAdminApi.queuePrint(packageId, undefined, observation);
+        setMessage('Etiket kuyruğa eklendi. Fiziksel baskı henüz doğrulanmadı.');
+      }
+    } catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); }
+  };
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
     try {
       const acceptedQuantityBaseInt = Number(accepted);
-      const damagedQuantityBaseInt = Number(damaged);
+      const damagedQuantityBaseInt = 0;
       const receiptId = crypto.randomUUID();
       const receiptPackages: Array<Record<string, unknown>> = [];
       if (acceptedQuantityBaseInt > 0) receiptPackages.push({ id: crypto.randomUUID(), code: packageCode.trim(), quantityBaseInt: acceptedQuantityBaseInt, disposition: "ACCEPTED" });
-      if (damagedQuantityBaseInt > 0) receiptPackages.push({ id: crypto.randomUUID(), code: `${packageCode.trim()}-DAMAGED`, quantityBaseInt: damagedQuantityBaseInt, disposition: "DAMAGED" });
       const body = {
         receiptId, receiptSeriesId: receiptId, stageIndex: 1, isFinal: true,
         costSnapshotId: costSnapshotId.trim(), supplierLotCode: supplierLotCode.trim(),
         acceptedQuantityBaseInt, damagedQuantityBaseInt, receivedAt: new Date().toISOString(), packages: receiptPackages,
         ...(selectedIntent?.packagePlan ? preparePlannedReceipt(selectedIntent.packagePlan, observations) : {}),
       };
-      const key = JSON.stringify({ costSnapshotId, supplierLotCode, observations, accepted, damaged, packageCode });
+      const key = JSON.stringify({ costSnapshotId, supplierLotCode, observations, accepted, packageCode });
       const attempt = retry?.key === key ? retry : { key, body, operationId: crypto.randomUUID() };
       setRetry(attempt);
       const result = await warehouseExecutionApi.receiveGoods(attempt.body, attempt.operationId);
       setRetry(null);
       setPackages(result.packages);
-      setMessage(`${result.status}: ${result.acceptedQuantityBaseInt} kullanılabilir, ${result.damagedQuantityBaseInt} karantina, ${result.shortageQuantityBaseInt} eksik.`);
+      setMessage(`${result.status}: ${result.acceptedQuantityBaseInt} kullanılabilir, ${result.shortageQuantityBaseInt} eksik.`);
       await loadReceiptIntents();
     } catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); }
   };
-  return <PermissionPage permission="warehouse:receive"><div className="space-y-5"><PageIntro eyebrow="Mal Kabul V2-08" title="Onaylı maliyet snapshot'ından kabul" description="Tek aşamalı kabul etkindir. Eksik miktar kaydedilir; fazla miktar önce yetkili onayı ister; hasarlı paket karantinaya gider."/>
+  return <PermissionPage permission="warehouse:receive"><div className="space-y-5"><PageIntro eyebrow="Mal Kabul V2-08" title="Onaylı maliyet snapshot'ından kabul" description="Tek aşamalı kabul etkindir. Eksik miktar kaydedilir; fazla miktar önce yetkili onayı ister."/>
     {message && <Notice message={message}/>} {error && <Notice error message={error}/>}<form onSubmit={submit} className="space-y-3 rounded-2xl border border-line bg-white p-4">
       <label className="block text-sm font-bold">Panel onaylı satın alma<select className="field mt-1" value={costSnapshotId} onChange={(event) => setCostSnapshotId(event.target.value)} required><option value="">Onaylı mal kabul kaydı seçin</option>{receiptIntents.map((intent) => <option key={intent.costSnapshotId} value={intent.costSnapshotId}>{intent.purchaseNumber} · {intent.sku} · {intent.supplierName} · {intent.quantityBaseInt} {intent.baseUomCode}</option>)}</select></label>
       {selectedIntent && <div className="rounded-xl border border-moss/20 bg-moss/5 p-3 text-sm"><strong>{selectedIntent.sku} · {selectedIntent.productTitle}</strong><p className="mt-1 text-muted">{selectedIntent.purchaseNumber} · {selectedIntent.supplierName} · planlanan {selectedIntent.totalQuantity ?? selectedIntent.quantityBaseInt} {selectedIntent.baseUomCode}</p>{selectedIntent.boxCount != null && selectedIntent.unitsPerBox != null && <div className="mt-3 grid grid-cols-2 gap-2 rounded-lg bg-white/70 p-3 text-xs sm:grid-cols-4"><p><span className="block text-muted">Tedarik No</span><b>{selectedIntent.supplierNo || "—"}</b></p><p><span className="block text-muted">Paketleme</span><b>{selectedIntent.boxCount} koli × {selectedIntent.unitsPerBox} adet</b></p><p><span className="block text-muted">Koli Ağırlığı</span><b>{selectedIntent.boxWeightKg?.toFixed(2)} kg</b></p><p><span className="block text-muted">Toplam Ağırlık</span><b>{selectedIntent.totalWeightKg?.toFixed(2)} kg</b></p></div>}</div>}
       {receiptIntents.length === 0 && <Notice message="Panel tarafından mal kabul için onaylanmış satın alma bulunmuyor."/>}
       <input className="field uppercase" value={supplierLotCode} onChange={(event) => setSupplierLotCode(event.target.value)} placeholder="Tedarikçi lotu" required/>
-      {selectedIntent?.packagePlan && <div className="space-y-2"><label>Paket barkodu tara<input className="field" value={scannedPackage} onChange={e => setScannedPackage(e.target.value.trim().toUpperCase())}/></label>{scannedPackage && <p role="status">{selectedIntent.packagePlan.packages.some(p => p.code === scannedPackage) ? "Paket bu alış satırının planında. Tarama stok oluşturmaz." : "Bu barkod seçili satırın planında yok."}</p>}<p className="text-xs">Plan {selectedIntent.packagePlan.version} · Tüm paketler bu alış satırı için birlikte kabul edilir. Sayım ve tarama stok artırmaz.</p>{selectedIntent.packagePlan.packages.map(p => { const o = observations[p.id] || { quantity: "", disposition: "ACCEPTED", weightKg: "", splitConfirmed: false }; const update = (fields: Partial<PackageObservation>) => setObservations(old => ({ ...old, [p.id]: { ...o, ...fields } })); return <div className={`rounded-xl border p-3 ${scannedPackage === p.code ? "border-moss bg-moss/5" : ""}`} key={p.id}><strong>{p.code}</strong><p className="text-xs">{p.sku} · {p.productType} · {p.title} · {p.size} · Planlanan {p.quantityBaseInt} · Kaynak koli {p.sourceGroupRef} / {p.sourceCartonId}</p><p className="text-xs">{p.grossWeightKgEstimate == null ? "Ağırlık —" : `Tahmini ${p.grossWeightKgEstimate.toFixed(3)} kg`}</p><label>Gerçek adet<input className="field" type="number" min="0" value={o.quantity} onChange={e => update({ quantity: e.target.value })}/></label><label>Ağırlık (kg)<input className="field" value={o.weightKg} onChange={e => update({ weightKg: e.target.value })}/></label><select className="field" value={o.disposition} onChange={e => update({ disposition: e.target.value })}><option value="ACCEPTED">Kabul</option><option value="DAMAGED">Hasarlı / karantina</option></select>{p.mixed && <label><input type="checkbox" checked={o.splitConfirmed} onChange={e => update({ splitConfirmed: e.target.checked })}/> Kaynak karışık koliden ayırdım ve bu paketi tarttım</label>}</div>; })}</div>}
+      {selectedIntent?.packagePlan && <div className="space-y-2"><label>Paket barkodu tara<input className="field" value={scannedPackage} onChange={e => setScannedPackage(e.target.value.trim().toUpperCase())}/></label>{scannedPackage && <p role="status">{selectedIntent.packagePlan.packages.some(p => p.code === scannedPackage) ? "Paket bu alış satırının planında. Tarama stok oluşturmaz." : "Bu barkod seçili satırın planında yok."}</p>}<p className="text-xs">Plan {selectedIntent.packagePlan.version} · Tüm paketler bu alış satırı için birlikte kabul edilir. Sayım ve tarama stok artırmaz.</p>{selectedIntent.packagePlan.packages.map(p => { const o = observations[p.id] || { quantity: "", weightKg: "", splitConfirmed: false }; const update = (fields: Partial<PackageObservation>) => setObservations(old => ({ ...old, [p.id]: { ...o, ...fields } })); return <div className={`rounded-xl border p-3 ${scannedPackage === p.code ? "border-moss bg-moss/5" : ""}`} key={p.id}><strong>{p.code}</strong><p className="text-xs">{p.sku} · {p.productType} · {p.title} · {p.size} · Planlanan {p.quantityBaseInt} · Kaynak koli {p.sourceGroupRef} / {p.sourceCartonId}</p><p className="text-xs">{p.grossWeightKgEstimate == null ? "Ağırlık —" : `Tahmini ${p.grossWeightKgEstimate.toFixed(3)} kg`}</p><label>Gerçek adet<input className="field" type="number" min="0" value={o.quantity} onChange={e => update({ quantity: e.target.value })}/></label><label>Ağırlık (kg)<input className="field" value={o.weightKg} onChange={e => update({ weightKg: e.target.value })}/></label><div className="mt-2 flex gap-2"><button type="button" className="secondary-button" disabled={busy || !supplierLotCode.trim()} onClick={() => void printPlanned(p.id, true)}>Etiket Önizle</button><button type="button" className="secondary-button" disabled={busy || !supplierLotCode.trim()} onClick={() => void printPlanned(p.id, false)}>Etiket Yazdır</button></div>{p.mixed && <label><input type="checkbox" checked={o.splitConfirmed} onChange={e => update({ splitConfirmed: e.target.checked })}/> Kaynak karışık koliden ayırdım ve bu paketi tarttım</label>}</div>; })}</div>}
       {!selectedIntent?.packagePlan && <><input className="field uppercase" value={packageCode} onChange={(event) => setPackageCode(event.target.value)} placeholder="Paket kodu" required/>
-      <div className="grid grid-cols-2 gap-3"><label className="text-sm font-bold">Kabul edilen<input className="field mt-1" type="number" min="0" step="1" value={accepted} onChange={(event) => setAccepted(event.target.value)} required/></label><label className="text-sm font-bold">Hasarlı / karantina<input className="field mt-1" type="number" min="0" step="1" value={damaged} onChange={(event) => setDamaged(event.target.value)} required/></label></div>
-      </>}<button className="primary-button w-full" disabled={busy || !selectedIntent || (!selectedIntent.packagePlan && Number(accepted) + Number(damaged) <= 0)}>Kabulü kaydet ve paket oluştur</button>
+      <div className="grid grid-cols-2 gap-3"><label className="text-sm font-bold">Kabul edilen<input className="field mt-1" type="number" min="0" step="1" value={accepted} onChange={(event) => setAccepted(event.target.value)} required/></label></div>
+      </>}<button className="primary-button w-full" disabled={busy || !selectedIntent || (!selectedIntent.packagePlan && Number(accepted) <= 0)}>Kabulü kaydet ve paket oluştur</button>
     </form>{packages.map((pkg) => <ExecutionPackageCard key={pkg.id} pkg={pkg}/>)}</div></PermissionPage>;
 }
 
@@ -398,7 +412,7 @@ export function LabelingPage() {
   const identify = async (identity: string) => { if (!pkg) return false; setBusy(true); setError(""); try { const updated = await warehouseExecutionApi.identifyPackage(pkg.id, identity); setPkg(updated); setMessage(`${updated.code} kimliği kaydedildi; artık yerleştirilebilir.`); return true; } catch (reason) { setError(getErrorMessage(reason)); return false; } finally { setBusy(false); } };
   const preview = async () => { if (!pkg) return; setBusy(true); setError(""); try { const snapshot = await warehouseAdminApi.getPackagePrintPreview(pkg.id); openPdfBlob(await labelApi.preview("goods_receipt", snapshot.payload)); } catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); } };
   const print = async () => { if (!pkg) return; setBusy(true); setError(""); try { const job = await warehouseAdminApi.queuePrint(pkg.id); setMessage(`${job.subject_code} işi QUEUED; operatör baskıyı ayrıca doğrulayana kadar basıldı sayılmaz.`); } catch (reason) { setError(getErrorMessage(reason)); } finally { setBusy(false); } };
-  return <PermissionPage permission="warehouse:print_labels"><div className="space-y-5"><PageIntro eyebrow="Etiketleme V2-14" title="Paket etiketini önizle ve yazdır" description="100×150 mm mal kabul etiketi SKU Code128 taşır. Kuyruğa alma fiziksel baskı onayı değildir."/>{message && <Notice message={message}/>} {error && <Notice error message={error}/>} {!pkg ? <ScanInput busy={busy} onScan={scanPackage} label="1. Paket kodunu okutun" placeholder="Paket kodu" cameraTitle="Paket kodunu okutun"/> : <><ExecutionPackageCard pkg={pkg}/><div className="grid grid-cols-2 gap-2"><button className="secondary-button" disabled={busy} onClick={() => void preview()}><Eye/>Önizle</button><button className="primary-button" disabled={busy} onClick={() => void print()}><Printer/>Yazdır</button></div><ScanInput busy={busy} onScan={identify} label="2. Etiket kimliğini okutun" placeholder="Etiket kimliği" cameraTitle="Etiket kimliğini okutun"/></>}</div></PermissionPage>;
+  return <PermissionPage permission="warehouse:print_labels"><div className="space-y-5"><PageIntro eyebrow="Etiketleme V2-14" title="Paket etiketini önizle ve yazdır" description="100×150 mm paket etiketi paket kimliğini Code128 olarak taşır. Kuyruğa alma fiziksel baskı onayı değildir."/>{message && <Notice message={message}/>} {error && <Notice error message={error}/>} {!pkg ? <ScanInput busy={busy} onScan={scanPackage} label="1. Paket kodunu okutun" placeholder="Paket kodu" cameraTitle="Paket kodunu okutun"/> : <><ExecutionPackageCard pkg={pkg}/><div className="grid grid-cols-2 gap-2"><button className="secondary-button" disabled={busy} onClick={() => void preview()}><Eye/>Önizle</button><button className="primary-button" disabled={busy} onClick={() => void print()}><Printer/>Yazdır</button></div><ScanInput busy={busy} onScan={identify} label="2. Etiket kimliğini okutun" placeholder="Etiket kimliği" cameraTitle="Etiket kimliğini okutun"/></>}</div></PermissionPage>;
 }
 
 function TwoStepPackagePage({ mode }: { mode: "place" | "move" }) {

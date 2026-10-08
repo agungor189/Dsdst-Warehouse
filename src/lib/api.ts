@@ -498,12 +498,14 @@ export const warehouseAdminApi = {
   async getPackage(code: string) {
     return (await request<WarehousePackage>(`/admin/packages/by-code/${encodeURIComponent(code)}`)).data;
   },
-  async getPackagePrintPreview(packageId: string) {
-    return (await request<{ purpose: "GOODS_RECEIPT_PACKAGE"; subjectId: string; subjectCode: string; payload: Record<string, unknown> }>(`/admin/packages/${encodeURIComponent(packageId)}/print-preview`)).data;
+  async getPackagePrintPreview(packageId: string, observation?: { planVersion: string; supplierLotCode: string; quantityBaseInt?: number }) {
+    const query = observation ? '?' + new URLSearchParams(Object.entries(observation).map(([k,v]) => [k, String(v)])).toString() : '';
+    return (await request<{ purpose: "GOODS_RECEIPT_PACKAGE"; subjectId: string; subjectCode: string; payload: Record<string, unknown> }>(`/admin/packages/${encodeURIComponent(packageId)}/print-preview${query}`)).data;
   },
-  async queuePrint(packageId: string, claimToken?: string | null) {
+  async queuePrint(packageId: string, claimToken?: string | null, observation?: { planVersion: string; supplierLotCode: string; quantityBaseInt?: number }) {
     return post<PrintJob>(`/admin/packages/${encodeURIComponent(packageId)}/print`, {
       claim_token: claimToken || undefined,
+      observation,
       idempotency_key: crypto.randomUUID(),
       device_id: warehouseDeviceId(),
     });

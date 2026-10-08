@@ -242,7 +242,7 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     next();
   };
 
-  const requireLivePanelCapability = (capability: "warehouse:print_labels") => async (_req: Request, res: ExpressResponse, next: NextFunction) => {
+  const requireLivePanelCapability = (capability: "warehouse:print_labels", allowReceiptPreview = false) => async (req: Request, res: ExpressResponse, next: NextFunction) => {
     if (configurationFailure(res)) return;
     const token = String(res.locals.sessionToken || "");
     if (!token) return res.status(401).json({ success: false, error: { code: "SESSION_REQUIRED", message: "Oturum açmanız gerekiyor." } });
@@ -263,7 +263,8 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     const permissions = user?.permissions && typeof user.permissions === "object" && !Array.isArray(user.permissions)
       ? user.permissions as Record<string, unknown>
       : {};
-    const allowed = user?.role === "admin" || permissions[capability] === true;
+    const allowed = user?.role === "admin" || permissions[capability] === true
+      || (allowReceiptPreview && req.body?.purpose === "goods_receipt" && permissions["warehouse:receive"] === true);
     if (!allowed) return res.status(403).json({ success: false, error: { code: "FORBIDDEN", message: `Bu işlem için ${capability} capability gerekli.` } });
     res.locals.panelUser = user;
     return next();
@@ -359,13 +360,13 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     }
   });
 
-  app.post("/api/labels/preview", requireSession, requireLivePanelCapability("warehouse:print_labels"), async (req, res) => {
+  app.post("/api/labels/preview", requireSession, requireLivePanelCapability("warehouse:print_labels", true), async (req, res) => {
     const purpose = safeQueryText(req.body?.purpose, 40);
     const data = req.body?.data && typeof req.body.data === "object" && !Array.isArray(req.body.data) ? req.body.data : {};
     const upstream = await fetchLabelPrinter(res, "/api/v1/render", {
       method: "POST",
       headers: { Accept: "application/pdf", "Content-Type": "application/json" },
-      body: JSON.stringify({ purpose, data }),
+      body: JSON.stringify({ purpose, data, ...(purpose === "goods_receipt" ? { contract: "package_identity" } : {}) }),
     });
     if (!upstream) return;
     const contentType = upstream.headers.get("content-type") || "application/octet-stream";
@@ -377,7 +378,7 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
   });
 
   const defaultTemplateSnapshot = async (res: ExpressResponse, purpose: "goods_receipt" | "location") => {
-    const upstream = await fetchLabelPrinter(res, `/api/v1/templates/default?purpose=${encodeURIComponent(purpose)}`, { headers: { Accept: "application/json" } });
+    const upstream = await fetchLabelPrinter(res, `/api/v1/templates/default?purpose=${encodeURIComponent(purpose)}${purpose === "goods_receipt" ? "&contract=package_identity" : ""}`, { headers: { Accept: "application/json" } });
     if (!upstream) return null;
     const raw = await upstream.text();
     if (!upstream.ok) {
@@ -772,12 +773,13 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
   app.get("/api/admin/packages/by-code/:code", requireSession, (req, res) =>
     forward(req, res, "GET", `/admin/packages/by-code/${encodeURIComponent(String(req.params.code))}`));
   app.get("/api/admin/packages/:id/print-preview", requireSession, (req, res) =>
-    forward(req, res, "GET", `/admin/packages/${encodeURIComponent(String(req.params.id))}/print-preview`));
+    forward(req, res, "GET", `/admin/packages/${encodeURIComponent(String(req.params.id))}/print-preview`, new URLSearchParams(Object.entries(req.query).filter(([key]) => ["planVersion","supplierLotCode","quantityBaseInt"].includes(key)).map(([key,value]) => [key,String(value)]))));
   app.post("/api/admin/packages/:id/print", requireSession, async (req, res) => {
     const templateSnapshot = await defaultTemplateSnapshot(res, "goods_receipt");
     if (!templateSnapshot) return;
     return forward(req, res, "POST", `/admin/packages/${encodeURIComponent(String(req.params.id))}/print`, undefined, {
       claim_token: safeQueryText(req.body?.claim_token, 200) || null,
+      ...(req.body?.observation ? { observation: { planVersion: req.body.observation.planVersion, supplierLotCode: req.body.observation.supplierLotCode, quantityBaseInt: req.body.observation.quantityBaseInt } } : {}),
       idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
       device_id: safeQueryText(req.body?.device_id, 150),
       printer_name: safeQueryText(req.body?.printer_name, 160) || null,
