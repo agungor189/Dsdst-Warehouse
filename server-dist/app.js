@@ -733,6 +733,10 @@ export function createWarehouseApp(config) {
         explanation: safeQueryText(req.body?.explanation, 1000) || null,
         idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
     }));
+    app.post("/api/admin/print-jobs/:id/acknowledge-replacement", requireSession, (req, res) => forward(req, res, "POST", `/admin/print-jobs/${encodeURIComponent(String(req.params.id))}/acknowledge-replacement`, undefined, {
+        oldLabelRemovedOrReplaced: req.body?.oldLabelRemovedOrReplaced === true,
+        idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+    }));
     app.post("/api/admin/print-jobs/:id/confirm", requireSession, (req, res) => forward(req, res, "POST", `/admin/print-jobs/${encodeURIComponent(String(req.params.id))}/confirm`, undefined, {
         idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
     }));

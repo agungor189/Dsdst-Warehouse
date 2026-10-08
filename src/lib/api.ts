@@ -122,6 +122,7 @@ export type ReprintReason = "DAMAGED_OUTPUT" | "LOST" | "PRINTER_ERROR" | "OTHER
 export type PrintJob = Record<string, unknown> & {
   id: string; purpose: "GOODS_RECEIPT_PACKAGE" | "LOCATION" | "SHIPPING";
   subject_id?: string; subject_code: string; status: "QUEUED" | "RENDERED" | "SUBMITTED" | "ACKNOWLEDGED" | "PRINTED_CONFIRMED" | "DELIVERY_UNKNOWN" | "FAILED" | "CANCELLED";
+  revision_ambiguous?: boolean; superseded_by_job_id?: string | null; current_job_id?: string; replacement_blocked?: boolean; replacement_warning?: string | null;
   attempts: Array<Record<string, unknown>>; history: Array<Record<string, unknown>>;
 };
 
@@ -522,6 +523,9 @@ export const warehouseAdminApi = {
   async listPrintJobs() { return (await request<PrintJob[]>("/admin/print-jobs?limit=200")).data; },
   async reprint(jobId: string, reason: ReprintReason, explanation?: string) {
     return post<PrintJob>(`/admin/print-jobs/${encodeURIComponent(jobId)}/reprint`, { reason, explanation, idempotency_key: crypto.randomUUID() });
+  },
+  async acknowledgeReplacement(jobId: string) {
+    return post<PrintJob>(`/admin/print-jobs/${encodeURIComponent(jobId)}/acknowledge-replacement`, { oldLabelRemovedOrReplaced: true, idempotency_key: crypto.randomUUID() });
   },
   async confirmPrinted(jobId: string) {
     return post<PrintJob>(`/admin/print-jobs/${encodeURIComponent(jobId)}/confirm`, { idempotency_key: crypto.randomUUID() });

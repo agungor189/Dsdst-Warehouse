@@ -696,6 +696,16 @@ describe("Warehouse BFF", () => {
     ]);
   });
 
+  it("replacement acknowledgement forwards only explicit confirmation with the human session", async () => {
+    const calls: any[] = [];
+    const panelUrl = await startPanel((req, res) => { calls.push(req.body); expect(req.header('authorization')).toBe(`Bearer ${SESSION}`); res.json({ success: true, data: { id: 'current' } }); });
+    const app = createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET });
+    const path = '/api/admin/print-jobs/current/acknowledge-replacement';
+    expect((await request(app).post(path).set('Origin', TRUSTED_ORIGIN).send({ oldLabelRemovedOrReplaced: true })).status).toBe(401);
+    for (const value of ['true',true]) await request(app).post(path).set('Cookie', sessionCookie).set('Origin', TRUSTED_ORIGIN).send({ idempotency_key: 'ack', oldLabelRemovedOrReplaced: value, unsafe: 'drop' });
+    expect(calls).toEqual([{ idempotency_key: 'ack', oldLabelRemovedOrReplaced: false }, { idempotency_key: 'ack', oldLabelRemovedOrReplaced: true }]);
+  });
+
   it("planned package preview forwards one selected package observation to P", async () => {
     let query: unknown;
     const panelUrl = await startPanel((req, res) => { query = req.query; expect(req.path).toBe('/api/warehouse/v1/admin/packages/pkg-plan/print-preview'); res.json({ success: true, data: { payload: { Package_code: 'PKG-PLAN' } } }); });
