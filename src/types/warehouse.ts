@@ -396,6 +396,12 @@ export interface ReceiptLabelPackage {
   currentJobId: string | null;
   currentJobStatus: string | null;
   revisionAmbiguous: boolean;
+  replacementRequired: boolean;
+  replacementBlocked: boolean;
+  replacementAcknowledged: boolean;
+  replacementWarning: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
   confirmationAvailable: boolean;
   canReprint: boolean;
 }
