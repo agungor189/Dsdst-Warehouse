@@ -546,6 +546,40 @@ describe("Warehouse BFF", () => {
     expect(response.body.data.code).toBe("A3-K2-P5");
   });
 
+  it("masaüstü Mal Kabul etiket özetini satın alma kimliğiyle güvenli upstream rotasından alır", async () => {
+    let receivedPath = "";
+    const panelUrl = await startPanel((req, res) => {
+      receivedPath = req.path;
+      res.json({ success: true, data: { purchaseOrderId: "purchase-1", skus: [] } });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET }))
+      .get("/api/admin/receiving/purchase-orders/purchase-1/labels").set("Cookie", sessionCookie);
+    expect(response.status).toBe(200);
+    expect(receivedPath).toBe("/api/warehouse/v1/admin/receiving/purchase-orders/purchase-1/labels");
+  });
+
+  it("SKU toplu baskıda yalnız izinli alanları ve değişmez şablon snapshot'ını aktarır", async () => {
+    let received: { path?: string; body?: any } = {};
+    const panelUrl = await startPanel((req, res) => {
+      received = { path: req.path, body: req.body };
+      res.status(201).json({ success: true, data: { jobs: [] } });
+    });
+    const labelUrl = await startPanel((req, res) => {
+      expect(req.path).toBe("/api/v1/templates/default");
+      res.json({ id: "template", purpose: "goods_receipt", version: 3, contentHash: "a".repeat(64), width: 100, height: 150, elements: [] });
+    });
+    const response = await request(createWarehouseApp({ panelApiBaseUrl: panelUrl, warehouseApiKey: SECRET, labelPrinterBaseUrl: labelUrl }))
+      .post("/api/admin/receiving/purchase-orders/purchase-1/labels/product-1/print")
+      .set("Cookie", sessionCookie).set("Origin", TRUSTED_ORIGIN)
+      .send({ mode: "ALL", supplier_lot_code: " LOT-1 ", idempotency_key: "bulk-op", printer_name: " XP-470B ", package_ids: ["unsafe"], role: "admin" });
+    expect(response.status).toBe(201);
+    expect(received.path).toBe("/api/warehouse/v1/admin/receiving/purchase-orders/purchase-1/labels/product-1/print");
+    expect(received.body).toMatchObject({ mode: "ALL", supplier_lot_code: "LOT-1", idempotency_key: "bulk-op", printer_name: "XP-470B",
+      template_snapshot: { id: "template", version: 3 } });
+    expect(received.body).not.toHaveProperty("package_ids");
+    expect(received.body).not.toHaveProperty("role");
+  });
+
   it.each([
     ["/api/admin/receiving/my-active-package", "/api/warehouse/v1/admin/receiving/my-active-package"],
     ["/api/admin/receiving/sessions/session-1/my-active-package", "/api/warehouse/v1/admin/receiving/sessions/session-1/my-active-package"],

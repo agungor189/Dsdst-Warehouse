@@ -736,6 +736,20 @@ export function createWarehouseApp(config: WarehouseBffConfig) {
     }));
   app.get("/api/admin/receiving/lots/:lot", requireSession, (req, res) =>
     forward(req, res, "GET", `/admin/receiving/lots/${encodeURIComponent(String(req.params.lot))}`));
+  app.get("/api/admin/receiving/purchase-orders/:purchaseOrderId/labels", requireSession, (req, res) =>
+    forward(req, res, "GET", `/admin/receiving/purchase-orders/${encodeURIComponent(String(req.params.purchaseOrderId))}/labels`));
+  app.post("/api/admin/receiving/purchase-orders/:purchaseOrderId/labels/:productId/print", requireSession, async (req, res) => {
+    const templateSnapshot = await defaultTemplateSnapshot(res, "goods_receipt");
+    if (!templateSnapshot) return;
+    return forward(req, res, "POST", `/admin/receiving/purchase-orders/${encodeURIComponent(String(req.params.purchaseOrderId))}/labels/${encodeURIComponent(String(req.params.productId))}/print`, undefined, {
+      mode: safeQueryText(req.body?.mode, 10),
+      supplier_lot_code: safeQueryText(req.body?.supplier_lot_code, 150),
+      idempotency_key: safeQueryText(req.body?.idempotency_key, 200),
+      device_id: safeQueryText(req.body?.device_id, 150),
+      printer_name: safeQueryText(req.body?.printer_name, 160) || null,
+      template_snapshot: templateSnapshot,
+    });
+  });
   app.get("/api/admin/receiving/sessions", requireSession, (req, res) =>
     forward(req, res, "GET", "/admin/receiving/sessions"));
   app.get("/api/admin/receiving/my-active-package", requireSession, (req, res) =>

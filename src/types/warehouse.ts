@@ -385,6 +385,43 @@ export interface ProcurementReceiptIntent {
   partWeightG: number | null;
 }
 
+export interface ReceiptLabelPackage {
+  id: string;
+  code: string;
+  packageNumber: number;
+  totalPackages: number;
+  quantityBaseInt: number;
+  planVersion: string;
+  normalPrinted: boolean;
+  currentJobId: string | null;
+  currentJobStatus: string | null;
+  revisionAmbiguous: boolean;
+  confirmationAvailable: boolean;
+  canReprint: boolean;
+}
+
+export interface ReceiptLabelSku {
+  productId: string;
+  sku: string;
+  productTitle: string;
+  material: string;
+  profileType: string;
+  size: string;
+  totalPackageCount: number;
+  printedCount: number;
+  nextPackageNumber: number | null;
+  packages: ReceiptLabelPackage[];
+}
+
+export interface ReceiptLabelOverview {
+  purchaseOrderId: string;
+  purchaseNumber: string;
+  supplierName: string;
+  observedAt: string;
+  live: boolean;
+  skus: ReceiptLabelSku[];
+}
+
 export interface PlannedReceiptPackage {
   id: string; code: string; quantityBaseInt: number; mixed: boolean;
   sourceCartonId: string; sourceGroupRef: string; sourceItemRef: string;

@@ -20,6 +20,7 @@ import type {
   WarehousePlacementPreview,
   WarehouseReplenishmentTask,
   ProcurementReceiptIntent,
+  ReceiptLabelOverview,
   CatalogProductV1,
   CatalogUomRegistryV1,
   InventoryAvailabilityV1,
@@ -468,6 +469,15 @@ export const warehouseAdminApi = {
   },
   async getLot(lotNumber: string) {
     return (await request<ReceivingLot>(`/admin/receiving/lots/${encodeURIComponent(lotNumber)}`)).data;
+  },
+  async getReceiptLabelOverview(purchaseOrderId: string) {
+    return (await request<ReceiptLabelOverview>(`/admin/receiving/purchase-orders/${encodeURIComponent(purchaseOrderId)}/labels`)).data;
+  },
+  async queueReceiptSkuPrint(purchaseOrderId: string, productId: string, mode: "NEXT" | "ALL", supplierLotCode: string) {
+    return post<{ jobs: PrintJob[]; blockedPackageNumbers: number[]; remainingUnprintedCount: number }>(
+      `/admin/receiving/purchase-orders/${encodeURIComponent(purchaseOrderId)}/labels/${encodeURIComponent(productId)}/print`,
+      { mode, supplier_lot_code: supplierLotCode, idempotency_key: crypto.randomUUID(), device_id: warehouseDeviceId() },
+    );
   },
   async listReceivingSessions() {
     return (await request<ReceivingSession[]>("/admin/receiving/sessions")).data;
